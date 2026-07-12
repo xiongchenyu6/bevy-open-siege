@@ -4499,7 +4499,7 @@ fn main() {
         });
 
     App::new()
-        .insert_resource(ClearColor(Color::srgb(0.05, 0.075, 0.055)))
+        .insert_resource(ClearColor(Color::srgb(0.055, 0.095, 0.08)))
         .insert_resource(BoardState::default())
         .insert_resource(LanguageSettings {
             current: save.language,
@@ -4939,16 +4939,32 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 9.5, 9.7).looking_at(Vec3::new(0.0, 0.0, 0.4), Vec3::Y),
+        AmbientLight {
+            color: Color::srgb(0.72, 0.86, 0.80),
+            brightness: 420.0,
+            ..default()
+        },
         Name::new("Board Camera"),
     ));
     commands.spawn((
         DirectionalLight {
-            illuminance: 7_500.0,
+            illuminance: 13_500.0,
+            color: Color::srgb(1.0, 0.96, 0.86),
             shadows_enabled: true,
             ..default()
         },
         Transform::from_xyz(-4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
         Name::new("Sun Key Light"),
+    ));
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 3_200.0,
+            color: Color::srgb(0.62, 0.74, 0.92),
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(5.0, 6.0, -3.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Name::new("Sky Fill Light"),
     ));
 }
 
