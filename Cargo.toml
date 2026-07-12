@@ -45,6 +45,7 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 inherits = "release"
 opt-level = "s"
 lto = "thin"
+strip = "symbols"
 
 [profile.dev]
 opt-level = 1

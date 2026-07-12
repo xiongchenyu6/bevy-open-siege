@@ -32,6 +32,22 @@ const BOARD_TOP: f32 = 3.0;
 const ZOMBIE_START_X: f32 = 7.3;
 const HOME_X: f32 = -6.4;
 const SAVE_FILE_NAME: &str = "bevy_open_siege_save.ron";
+
+// Binary assets are embedded for desktop packaging/audits only; on web they are
+// fetched over HTTP by the asset server, so keep them out of the wasm binary.
+macro_rules! embedded_bytes {
+    ($path:literal) => {{
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            include_bytes!($path) as &[u8]
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            &[] as &[u8]
+        }
+    }};
+}
+
 const LEVELS_RON: &str = include_str!("../assets/data/levels.ron");
 const EN_RON: &str = include_str!("../assets/i18n/en.ron");
 const ZH_RON: &str = include_str!("../assets/i18n/zh.ron");
@@ -58,29 +74,29 @@ const LINUX_APPSTREAM_METAINFO: &str =
     include_str!("../assets/linux/io.github.bevy_open_siege.BevyOpenSiege.metainfo.xml");
 const BRAND_ICON_SVG: &str = include_str!("../assets/branding/icon.svg");
 const BRAND_CAPSULE_SVG: &str = include_str!("../assets/branding/capsule.svg");
-const APP_ICON_PNG: &[u8] = include_bytes!("../assets/branding/generated/app-icon.png");
-const STORE_CAPSULE_PNG: &[u8] = include_bytes!("../assets/branding/generated/store-capsule.png");
-const PLANTS_SHEET_PNG: &[u8] = include_bytes!("../assets/art/plants-sheet.png");
-const MONSTERS_SHEET_PNG: &[u8] = include_bytes!("../assets/art/monsters-sheet.png");
-const MUSIC_LOOP_WAV: &[u8] = include_bytes!("../assets/audio/music-loop.wav");
-const PLANT_PLACE_WAV: &[u8] = include_bytes!("../assets/audio/plant-place.wav");
-const SHOOT_WAV: &[u8] = include_bytes!("../assets/audio/shoot.wav");
-const SUN_COLLECT_WAV: &[u8] = include_bytes!("../assets/audio/sun-collect.wav");
-const MONSTER_DOWN_WAV: &[u8] = include_bytes!("../assets/audio/monster-down.wav");
-const VICTORY_WAV: &[u8] = include_bytes!("../assets/audio/victory.wav");
-const DEFEAT_WAV: &[u8] = include_bytes!("../assets/audio/defeat.wav");
-const EFFECT_PEA_PNG: &[u8] = include_bytes!("../assets/art/effects/pea.png");
-const EFFECT_FROST_POD_PNG: &[u8] = include_bytes!("../assets/art/effects/frost-pod.png");
-const EFFECT_CABBAGE_PNG: &[u8] = include_bytes!("../assets/art/effects/cabbage.png");
-const EFFECT_SUN_PNG: &[u8] = include_bytes!("../assets/art/effects/sun.png");
-const EFFECT_FIRE_PNG: &[u8] = include_bytes!("../assets/art/effects/fire.png");
-const EFFECT_EXPLOSION_PNG: &[u8] = include_bytes!("../assets/art/effects/explosion.png");
-const ENV_LAWN_BASE_PNG: &[u8] = include_bytes!("../assets/art/environment/lawn-base.png");
-const ENV_LANE_GRASS_PNG: &[u8] = include_bytes!("../assets/art/environment/lane-grass.png");
-const ENV_SOIL_BORDER_PNG: &[u8] = include_bytes!("../assets/art/environment/soil-border.png");
-const UI_MENU_PANEL_PNG: &[u8] = include_bytes!("../assets/art/ui/menu-panel.png");
-const UI_HUD_PANEL_PNG: &[u8] = include_bytes!("../assets/art/ui/hud-panel.png");
-const UI_END_PANEL_PNG: &[u8] = include_bytes!("../assets/art/ui/end-panel.png");
+const APP_ICON_PNG: &[u8] = embedded_bytes!("../assets/branding/generated/app-icon.png");
+const STORE_CAPSULE_PNG: &[u8] = embedded_bytes!("../assets/branding/generated/store-capsule.png");
+const PLANTS_SHEET_PNG: &[u8] = embedded_bytes!("../assets/art/plants-sheet.png");
+const MONSTERS_SHEET_PNG: &[u8] = embedded_bytes!("../assets/art/monsters-sheet.png");
+const MUSIC_LOOP_WAV: &[u8] = embedded_bytes!("../assets/audio/music-loop.wav");
+const PLANT_PLACE_WAV: &[u8] = embedded_bytes!("../assets/audio/plant-place.wav");
+const SHOOT_WAV: &[u8] = embedded_bytes!("../assets/audio/shoot.wav");
+const SUN_COLLECT_WAV: &[u8] = embedded_bytes!("../assets/audio/sun-collect.wav");
+const MONSTER_DOWN_WAV: &[u8] = embedded_bytes!("../assets/audio/monster-down.wav");
+const VICTORY_WAV: &[u8] = embedded_bytes!("../assets/audio/victory.wav");
+const DEFEAT_WAV: &[u8] = embedded_bytes!("../assets/audio/defeat.wav");
+const EFFECT_PEA_PNG: &[u8] = embedded_bytes!("../assets/art/effects/pea.png");
+const EFFECT_FROST_POD_PNG: &[u8] = embedded_bytes!("../assets/art/effects/frost-pod.png");
+const EFFECT_CABBAGE_PNG: &[u8] = embedded_bytes!("../assets/art/effects/cabbage.png");
+const EFFECT_SUN_PNG: &[u8] = embedded_bytes!("../assets/art/effects/sun.png");
+const EFFECT_FIRE_PNG: &[u8] = embedded_bytes!("../assets/art/effects/fire.png");
+const EFFECT_EXPLOSION_PNG: &[u8] = embedded_bytes!("../assets/art/effects/explosion.png");
+const ENV_LAWN_BASE_PNG: &[u8] = embedded_bytes!("../assets/art/environment/lawn-base.png");
+const ENV_LANE_GRASS_PNG: &[u8] = embedded_bytes!("../assets/art/environment/lane-grass.png");
+const ENV_SOIL_BORDER_PNG: &[u8] = embedded_bytes!("../assets/art/environment/soil-border.png");
+const UI_MENU_PANEL_PNG: &[u8] = embedded_bytes!("../assets/art/ui/menu-panel.png");
+const UI_HUD_PANEL_PNG: &[u8] = embedded_bytes!("../assets/art/ui/hud-panel.png");
+const UI_END_PANEL_PNG: &[u8] = embedded_bytes!("../assets/art/ui/end-panel.png");
 const AUDIO_MUSIC_LOOP: &str = "audio/music-loop.wav";
 const AUDIO_PLANT_PLACE: &str = "audio/plant-place.wav";
 const AUDIO_SHOOT: &str = "audio/shoot.wav";
@@ -134,169 +150,169 @@ const UI_ASSETS: [(&str, &[u8]); 3] = [
 const PLANT_SPRITE_ASSETS: [(&str, &[u8]); 10] = [
     (
         "assets/art/sprites/plants/sprout-slinger.png",
-        include_bytes!("../assets/art/sprites/plants/sprout-slinger.png"),
+        embedded_bytes!("../assets/art/sprites/plants/sprout-slinger.png"),
     ),
     (
         "assets/art/sprites/plants/sunbloom.png",
-        include_bytes!("../assets/art/sprites/plants/sunbloom.png"),
+        embedded_bytes!("../assets/art/sprites/plants/sunbloom.png"),
     ),
     (
         "assets/art/sprites/plants/bark-bulwark.png",
-        include_bytes!("../assets/art/sprites/plants/bark-bulwark.png"),
+        embedded_bytes!("../assets/art/sprites/plants/bark-bulwark.png"),
     ),
     (
         "assets/art/sprites/plants/frost-sprout.png",
-        include_bytes!("../assets/art/sprites/plants/frost-sprout.png"),
+        embedded_bytes!("../assets/art/sprites/plants/frost-sprout.png"),
     ),
     (
         "assets/art/sprites/plants/twin-pod.png",
-        include_bytes!("../assets/art/sprites/plants/twin-pod.png"),
+        embedded_bytes!("../assets/art/sprites/plants/twin-pod.png"),
     ),
     (
         "assets/art/sprites/plants/leaf-lobber.png",
-        include_bytes!("../assets/art/sprites/plants/leaf-lobber.png"),
+        embedded_bytes!("../assets/art/sprites/plants/leaf-lobber.png"),
     ),
     (
         "assets/art/sprites/plants/briar-mat.png",
-        include_bytes!("../assets/art/sprites/plants/briar-mat.png"),
+        embedded_bytes!("../assets/art/sprites/plants/briar-mat.png"),
     ),
     (
         "assets/art/sprites/plants/blast-berry.png",
-        include_bytes!("../assets/art/sprites/plants/blast-berry.png"),
+        embedded_bytes!("../assets/art/sprites/plants/blast-berry.png"),
     ),
     (
         "assets/art/sprites/plants/ember-stump.png",
-        include_bytes!("../assets/art/sprites/plants/ember-stump.png"),
+        embedded_bytes!("../assets/art/sprites/plants/ember-stump.png"),
     ),
     (
         "assets/art/sprites/plants/scent-root.png",
-        include_bytes!("../assets/art/sprites/plants/scent-root.png"),
+        embedded_bytes!("../assets/art/sprites/plants/scent-root.png"),
     ),
 ];
 const MONSTER_SPRITE_ASSETS: [(&str, &[u8]); 10] = [
     (
         "assets/art/sprites/monsters/walker.png",
-        include_bytes!("../assets/art/sprites/monsters/walker.png"),
+        embedded_bytes!("../assets/art/sprites/monsters/walker.png"),
     ),
     (
         "assets/art/sprites/monsters/conehead.png",
-        include_bytes!("../assets/art/sprites/monsters/conehead.png"),
+        embedded_bytes!("../assets/art/sprites/monsters/conehead.png"),
     ),
     (
         "assets/art/sprites/monsters/runner.png",
-        include_bytes!("../assets/art/sprites/monsters/runner.png"),
+        embedded_bytes!("../assets/art/sprites/monsters/runner.png"),
     ),
     (
         "assets/art/sprites/monsters/buckethead.png",
-        include_bytes!("../assets/art/sprites/monsters/buckethead.png"),
+        embedded_bytes!("../assets/art/sprites/monsters/buckethead.png"),
     ),
     (
         "assets/art/sprites/monsters/brute.png",
-        include_bytes!("../assets/art/sprites/monsters/brute.png"),
+        embedded_bytes!("../assets/art/sprites/monsters/brute.png"),
     ),
     (
         "assets/art/sprites/monsters/healer.png",
-        include_bytes!("../assets/art/sprites/monsters/healer.png"),
+        embedded_bytes!("../assets/art/sprites/monsters/healer.png"),
     ),
     (
         "assets/art/sprites/monsters/jumper.png",
-        include_bytes!("../assets/art/sprites/monsters/jumper.png"),
+        embedded_bytes!("../assets/art/sprites/monsters/jumper.png"),
     ),
     (
         "assets/art/sprites/monsters/digger.png",
-        include_bytes!("../assets/art/sprites/monsters/digger.png"),
+        embedded_bytes!("../assets/art/sprites/monsters/digger.png"),
     ),
     (
         "assets/art/sprites/monsters/frostbite.png",
-        include_bytes!("../assets/art/sprites/monsters/frostbite.png"),
+        embedded_bytes!("../assets/art/sprites/monsters/frostbite.png"),
     ),
     (
         "assets/art/sprites/monsters/gargantuar.png",
-        include_bytes!("../assets/art/sprites/monsters/gargantuar.png"),
+        embedded_bytes!("../assets/art/sprites/monsters/gargantuar.png"),
     ),
 ];
 const PLANT_MODEL_ASSETS: [(&str, &[u8]); 10] = [
     (
         "assets/models/plants/sprout-slinger.glb",
-        include_bytes!("../assets/models/plants/sprout-slinger.glb"),
+        embedded_bytes!("../assets/models/plants/sprout-slinger.glb"),
     ),
     (
         "assets/models/plants/sunbloom.glb",
-        include_bytes!("../assets/models/plants/sunbloom.glb"),
+        embedded_bytes!("../assets/models/plants/sunbloom.glb"),
     ),
     (
         "assets/models/plants/bark-bulwark.glb",
-        include_bytes!("../assets/models/plants/bark-bulwark.glb"),
+        embedded_bytes!("../assets/models/plants/bark-bulwark.glb"),
     ),
     (
         "assets/models/plants/frost-sprout.glb",
-        include_bytes!("../assets/models/plants/frost-sprout.glb"),
+        embedded_bytes!("../assets/models/plants/frost-sprout.glb"),
     ),
     (
         "assets/models/plants/twin-pod.glb",
-        include_bytes!("../assets/models/plants/twin-pod.glb"),
+        embedded_bytes!("../assets/models/plants/twin-pod.glb"),
     ),
     (
         "assets/models/plants/leaf-lobber.glb",
-        include_bytes!("../assets/models/plants/leaf-lobber.glb"),
+        embedded_bytes!("../assets/models/plants/leaf-lobber.glb"),
     ),
     (
         "assets/models/plants/briar-mat.glb",
-        include_bytes!("../assets/models/plants/briar-mat.glb"),
+        embedded_bytes!("../assets/models/plants/briar-mat.glb"),
     ),
     (
         "assets/models/plants/blast-berry.glb",
-        include_bytes!("../assets/models/plants/blast-berry.glb"),
+        embedded_bytes!("../assets/models/plants/blast-berry.glb"),
     ),
     (
         "assets/models/plants/ember-stump.glb",
-        include_bytes!("../assets/models/plants/ember-stump.glb"),
+        embedded_bytes!("../assets/models/plants/ember-stump.glb"),
     ),
     (
         "assets/models/plants/scent-root.glb",
-        include_bytes!("../assets/models/plants/scent-root.glb"),
+        embedded_bytes!("../assets/models/plants/scent-root.glb"),
     ),
 ];
 const MONSTER_MODEL_ASSETS: [(&str, &[u8]); 10] = [
     (
         "assets/models/monsters/walker.glb",
-        include_bytes!("../assets/models/monsters/walker.glb"),
+        embedded_bytes!("../assets/models/monsters/walker.glb"),
     ),
     (
         "assets/models/monsters/conehead.glb",
-        include_bytes!("../assets/models/monsters/conehead.glb"),
+        embedded_bytes!("../assets/models/monsters/conehead.glb"),
     ),
     (
         "assets/models/monsters/runner.glb",
-        include_bytes!("../assets/models/monsters/runner.glb"),
+        embedded_bytes!("../assets/models/monsters/runner.glb"),
     ),
     (
         "assets/models/monsters/buckethead.glb",
-        include_bytes!("../assets/models/monsters/buckethead.glb"),
+        embedded_bytes!("../assets/models/monsters/buckethead.glb"),
     ),
     (
         "assets/models/monsters/brute.glb",
-        include_bytes!("../assets/models/monsters/brute.glb"),
+        embedded_bytes!("../assets/models/monsters/brute.glb"),
     ),
     (
         "assets/models/monsters/healer.glb",
-        include_bytes!("../assets/models/monsters/healer.glb"),
+        embedded_bytes!("../assets/models/monsters/healer.glb"),
     ),
     (
         "assets/models/monsters/jumper.glb",
-        include_bytes!("../assets/models/monsters/jumper.glb"),
+        embedded_bytes!("../assets/models/monsters/jumper.glb"),
     ),
     (
         "assets/models/monsters/digger.glb",
-        include_bytes!("../assets/models/monsters/digger.glb"),
+        embedded_bytes!("../assets/models/monsters/digger.glb"),
     ),
     (
         "assets/models/monsters/frostbite.glb",
-        include_bytes!("../assets/models/monsters/frostbite.glb"),
+        embedded_bytes!("../assets/models/monsters/frostbite.glb"),
     ),
     (
         "assets/models/monsters/gargantuar.glb",
-        include_bytes!("../assets/models/monsters/gargantuar.glb"),
+        embedded_bytes!("../assets/models/monsters/gargantuar.glb"),
     ),
 ];
 

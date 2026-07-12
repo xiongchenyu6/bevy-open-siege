@@ -2,6 +2,8 @@
 
 A Bevy lane-defense strategy game: place greenhouse defenders, manage sun income, and survive escalating undead waves.
 
+**Play in your browser:** <https://xiongchenyu6.github.io/bevy-open-siege/> (WASM build; audio is desktop-only)
+
 ## Controls
 
 - `Enter`: start or restart
