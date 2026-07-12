@@ -4568,6 +4568,7 @@ fn main() {
                 tick_visual_effects,
                 move_projectiles,
                 move_and_attack_zombies,
+                animate_units,
                 cleanup_dead,
             )
                 .chain()
@@ -6754,6 +6755,25 @@ fn move_projectiles(
                 projectile.pierce -= 1;
             }
         }
+    }
+}
+
+fn animate_units(
+    time: Res<Time>,
+    mut plants: Query<(&mut Transform, &Plant), Without<Zombie>>,
+    mut zombies: Query<(&mut Transform, &Zombie), Without<Plant>>,
+) {
+    let t = time.elapsed_secs();
+    for (mut transform, plant) in &mut plants {
+        let phase = plant.col as f32 * 1.3 + plant.lane as f32 * 2.1;
+        transform.rotation = Quat::from_rotation_z((t * 1.8 + phase).sin() * 0.045)
+            * Quat::from_rotation_x((t * 1.3 + phase).cos() * 0.03);
+    }
+    for (mut transform, zombie) in &mut zombies {
+        let phase = zombie.lane as f32 * 1.7 + transform.translation.x * 2.0;
+        let step = (t * 5.0 + phase).sin();
+        transform.translation.y = 0.04 + step.abs() * 0.05;
+        transform.rotation = Quat::from_rotation_z(step * 0.06);
     }
 }
 
