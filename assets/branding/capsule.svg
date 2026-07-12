@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Bevy Open Siege Store Capsule</title>
+  <desc id="desc">A stylized lane-defense scene with plant silhouettes holding back undead attackers.</desc>
+  <rect width="1600" height="900" fill="#0d1710"/>
+  <linearGradient id="sky" x1="0" x2="0" y1="0" y2="1">
+    <stop offset="0" stop-color="#1b3320"/>
+    <stop offset="1" stop-color="#0d1710"/>
+  </linearGradient>
+  <rect width="1600" height="560" fill="url(#sky)"/>
+  <g opacity=".36" stroke="#315c38" stroke-width="4">
+    <path d="M0 640h1600M0 720h1600M0 800h1600"/>
+    <path d="M220 560v340M420 560v340M620 560v340M820 560v340M1020 560v340M1220 560v340M1420 560v340"/>
+  </g>
+  <g fill="#74c947">
+    <circle cx="250" cy="610" r="46"/>
+    <circle cx="380" cy="720" r="52"/>
+    <circle cx="530" cy="635" r="44"/>
+    <rect x="232" y="650" width="36" height="90" rx="18"/>
+    <rect x="362" y="762" width="36" height="96" rx="18"/>
+    <rect x="512" y="674" width="36" height="94" rx="18"/>
+  </g>
+  <g fill="#cfe978">
+    <circle cx="385" cy="720" r="22"/>
+    <circle cx="247" cy="608" r="18"/>
+  </g>
+  <g fill="#7f8f77">
+    <circle cx="1120" cy="635" r="42"/>
+    <circle cx="1260" cy="720" r="48"/>
+    <circle cx="1400" cy="640" r="56"/>
+    <rect x="1092" y="674" width="56" height="104" rx="22"/>
+    <rect x="1230" y="764" width="60" height="110" rx="24"/>
+    <rect x="1364" y="690" width="72" height="132" rx="28"/>
+  </g>
+  <path d="M690 610c120 10 230 44 340 102" stroke="#b7ef6a" stroke-width="16" stroke-linecap="round" fill="none"/>
+  <text x="120" y="220" font-family="Arial, sans-serif" font-size="116" font-weight="700" fill="#e7f6bb">BEVY OPEN SIEGE</text>
+  <text x="126" y="300" font-family="Arial, sans-serif" font-size="42" fill="#9ccf87">Hold the lanes. Grow the defense.</text>
+</svg>

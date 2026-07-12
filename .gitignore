@@ -1,0 +1,7 @@
+.direnv
+result
+target
+__pycache__/
+*.pyc
+dist/
+web-dist/

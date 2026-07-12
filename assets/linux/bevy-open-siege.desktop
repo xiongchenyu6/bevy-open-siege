@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Bevy Open Siege
+Comment=Defend the last greenhouse with tactical plant placement and sun economy
+Exec=bevy_open_siege
+Icon=bevy-open-siege
+Terminal=false
+Categories=Game;StrategyGame;
+Keywords=strategy;tower-defense;lane-defense;plants;undead;

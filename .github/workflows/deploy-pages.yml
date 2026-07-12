@@ -1,0 +1,60 @@
+name: Deploy web build to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-bindgen-cli (version from Cargo.lock)
+        run: |
+          VERSION=$(grep -A1 'name = "wasm-bindgen"$' Cargo.lock | grep version | cut -d'"' -f2)
+          echo "wasm-bindgen ${VERSION}"
+          curl -sSL "https://github.com/rustwasm/wasm-bindgen/releases/download/${VERSION}/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl.tar.gz" | tar xz
+          echo "${PWD}/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl" >> "$GITHUB_PATH"
+
+      - name: Build wasm binary
+        run: cargo build --profile web-release --target wasm32-unknown-unknown
+
+      - name: Generate web bundle
+        run: |
+          mkdir -p web-dist
+          wasm-bindgen --no-typescript --target web \
+            --out-dir web-dist --out-name bevy_open_siege \
+            target/wasm32-unknown-unknown/web-release/bevy_open_siege.wasm
+          cp web/index.html web-dist/
+          cp -r assets web-dist/assets
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web-dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
