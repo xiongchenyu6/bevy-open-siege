@@ -5531,7 +5531,6 @@ fn start_game(
         base_color: Color::WHITE,
         base_color_texture: Some(asset_server.load(ENV_LAWN_BASE)),
         perceptual_roughness: 0.92,
-        unlit: true,
         ..default()
     });
     commands.spawn((
@@ -5550,7 +5549,6 @@ fn start_game(
                 base_color: Color::srgb(tint, tint, tint),
                 base_color_texture: Some(asset_server.load(ENV_LANE_GRASS)),
                 perceptual_roughness: 0.95,
-                unlit: true,
                 ..default()
             });
             commands.spawn((
@@ -5566,7 +5564,6 @@ fn start_game(
         base_color: Color::WHITE,
         base_color_texture: Some(asset_server.load(ENV_SOIL_BORDER)),
         perceptual_roughness: 0.98,
-        unlit: true,
         ..default()
     });
     let horizontal_border = meshes.add(Cuboid::new(13.0, 0.10, 0.36));
@@ -5887,7 +5884,7 @@ fn spawn_plant(
     };
     commands.spawn((
         SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(kind.model_path()))),
-        Transform::from_xyz(col_x(col), 0.04, lane_z(lane)),
+        Transform::from_xyz(col_x(col), 0.04, lane_z(lane)).with_scale(Vec3::splat(1.2)),
         Plant {
             kind,
             col,
@@ -7438,7 +7435,7 @@ mod tests {
         assert!(report.contains("sun pickup budget: 47"));
         assert!(report.contains("visual effect budget: 45"));
         assert!(report.contains("estimated dynamic entities: 275/320"));
-        assert!(report.contains("embedded asset bytes: 16424690/25000000"));
+        assert!(report.contains("embedded asset bytes: 16939598/25000000"));
         assert!(report.contains("checked viewport floor: compact-540p 960x540"));
         assert!(report.contains("manual performance QA still required"));
     }

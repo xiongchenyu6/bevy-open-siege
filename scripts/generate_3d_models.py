@@ -11,11 +11,22 @@ import math
 from pathlib import Path
 
 import bpy
+from mathutils import Matrix
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PLANT_DIR = ROOT / "assets" / "models" / "plants"
 MONSTER_DIR = ROOT / "assets" / "models" / "monsters"
+
+
+def _bl(loc: tuple[float, float, float]) -> tuple[float, float, float]:
+    """Map authored (x, up, front) coordinates to Blender (x, -front, up).
+
+    Units are authored with +Y as up and +Z toward the camera. Blender's up is
+    +Z, so remap here once; primitives then stand upright by default and the
+    glTF exporter's y-up conversion puts the model the right way up in-engine.
+    """
+    return (loc[0], -loc[2], loc[1])
 
 
 def clear_scene() -> None:
@@ -59,7 +70,7 @@ def material(
 
     if emission is not None and emission_strength > 0:
         bsdf.inputs["Emission Color"].default_value = (*emission, 1.0)
-        bsdf.inputs["Emission Strength"].default_value = min(3.0, emission_strength)
+        bsdf.inputs["Emission Strength"].default_value = min(1.5, emission_strength)
     else:
         bsdf.inputs["Emission Color"].default_value = (0.0, 0.0, 0.0, 1.0)
         bsdf.inputs["Emission Strength"].default_value = 0.0
@@ -89,10 +100,10 @@ def add_uv_sphere(
     rings: int = 6,
     smooth: bool = True,
 ) -> bpy.types.Object:
-    bpy.ops.mesh.primitive_uv_sphere_add(segments=segments, ring_count=rings, location=loc)
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=segments, ring_count=rings, location=_bl(loc))
     obj = bpy.context.object
     obj.name = name
-    obj.scale = scale
+    obj.scale = (scale[0], scale[2], scale[1])
     obj.data.materials.append(mat)
     if smooth:
         for poly in obj.data.polygons:
@@ -108,10 +119,10 @@ def add_cube(
     *,
     smooth: bool = False,
 ) -> bpy.types.Object:
-    bpy.ops.mesh.primitive_cube_add(location=loc)
+    bpy.ops.mesh.primitive_cube_add(location=_bl(loc))
     obj = bpy.context.object
     obj.name = name
-    obj.scale = scale
+    obj.scale = (scale[0], scale[2], scale[1])
     obj.data.materials.append(mat)
     if smooth:
         for poly in obj.data.polygons:
@@ -129,7 +140,7 @@ def add_cylinder(
     vertices: int = 16,
     smooth: bool = True,
 ) -> bpy.types.Object:
-    bpy.ops.mesh.primitive_cylinder_add(vertices=vertices, radius=radius, depth=depth, location=loc)
+    bpy.ops.mesh.primitive_cylinder_add(vertices=vertices, radius=radius, depth=depth, location=_bl(loc))
     obj = bpy.context.object
     obj.name = name
     obj.scale = (1.0, 1.0, 1.0)
@@ -151,7 +162,7 @@ def add_cone(
     vertices: int = 16,
     smooth: bool = False,
 ) -> bpy.types.Object:
-    bpy.ops.mesh.primitive_cone_add(vertices=vertices, radius1=radius1, radius2=radius2, depth=depth, location=loc)
+    bpy.ops.mesh.primitive_cone_add(vertices=vertices, radius1=radius1, radius2=radius2, depth=depth, location=_bl(loc))
     obj = bpy.context.object
     obj.name = name
     obj.data.materials.append(mat)
@@ -162,13 +173,25 @@ def add_cone(
 
 
 def rotate(obj: bpy.types.Object, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> None:
-    obj.rotation_euler = (x, y, z)
+    """Rotate in place, angles given in the authored frame (x right, y up, z front).
+
+    Composes onto the object's existing local rotation (cylinders/cones carry a
+    +90° X pre-rotation to stand upright) and never touches location or scale.
+    """
+    frame = Matrix.Rotation(math.radians(-90.0), 4, "X")  # Blender -> authored
+    authored = (
+        Matrix.Rotation(z, 4, "Z")
+        @ Matrix.Rotation(y, 4, "Y")
+        @ Matrix.Rotation(x, 4, "X")
+    )
+    existing = obj.rotation_euler.to_matrix().to_4x4()
+    obj.rotation_euler = (frame.inverted() @ authored @ frame @ existing).to_euler()
 
 
 def nudge(obj: bpy.types.Object, offset: tuple[float, float, float]) -> None:
     obj.location.x += offset[0]
-    obj.location.y += offset[1]
-    obj.location.z += offset[2]
+    obj.location.y += -offset[2]
+    obj.location.z += offset[1]
 
 
 def add_bevel(obj: bpy.types.Object, width: float = 0.025, segments: int = 2) -> None:
@@ -194,10 +217,9 @@ def add_facial_feature(
     pupil_mat: bpy.types.Material,
     mouth_mat: bpy.types.Material,
 ) -> None:
-    eye = add_uv_sphere("eye", (x, y, z), (0.07, 0.045, 0.07), eye_mat, segments=10, rings=6)
-    add_uv_sphere("pupil", (x + 0.03, y, z), (0.028, 0.018, 0.028), pupil_mat, segments=8, rings=5)
-    # Brows and tiny mouth for silhouette and expression.
-    add_cube("brow", (x - 0.02, y + 0.05, z + 0.06), (0.032, 0.008, 0.018), mouth_mat)
+    facing = 1.0 if x >= 0.0 else -1.0
+    add_uv_sphere("eye", (x, y, z), (0.07, 0.045, 0.07), eye_mat, segments=10, rings=6)
+    add_uv_sphere("pupil", (x + facing * 0.038, y, z), (0.028, 0.02, 0.028), pupil_mat, segments=8, rings=5)
 
 
 def add_tusks(
@@ -207,8 +229,7 @@ def add_tusks(
     length: float = 0.09,
 ) -> None:
     for z in z_offsets:
-        tusk = add_cylinder("tusk", (loc[0], loc[1], loc[2] + z), 0.012, length, mat, vertices=12)
-        rotate(tusk, 0.0, math.radians(95), 0.0)
+        add_cylinder("tusk", (loc[0], loc[1], loc[2] + z), 0.012, length, mat, vertices=12)
 
 
 def add_leaf_cluster(name: str, base_x: float, base_y: float, base_z: float, mat: bpy.types.Material) -> None:
@@ -398,7 +419,7 @@ def monster_materials() -> dict[str, dict[str, bpy.types.Material]]:
                 "skin": ((0.40, 0.50, 0.34), 0.58, None, 0.0),
                 "robe": ((0.50, 0.27, 0.66), 0.45, None, 0.0),
                 "gold": ((0.78, 0.64, 0.25), 0.35, None, 0.0),
-                "orb": ((0.64, 0.78, 0.98), 0.32, (0.6, 0.9, 1.0), 1.8),
+                "orb": ((0.64, 0.78, 0.98), 0.32, (0.6, 0.9, 1.0), 0.6),
                 "dark": ((0.17, 0.20, 0.14), 0.45, None, 0.0),
             },
         ),
@@ -428,7 +449,7 @@ def monster_materials() -> dict[str, dict[str, bpy.types.Material]]:
         "frostbite": material_set(
             "frostbite",
             {
-                "skin": ((0.56, 0.80, 0.85), 0.40, (0.68, 0.90, 1.0), 0.8),
+                "skin": ((0.56, 0.80, 0.85), 0.40, (0.68, 0.90, 1.0), 0.25),
                 "dark": ((0.16, 0.24, 0.32), 0.44, None, 0.0),
                 "ice": ((0.74, 0.92, 1.0), 0.30, (0.75, 0.95, 1.0), 1.2),
                 "cloth": ((0.42, 0.45, 0.52), 0.5, None, 0.0),
@@ -498,17 +519,17 @@ def plant_sunbloom(path: Path) -> None:
         petal = add_uv_sphere(
             f"petal_{i}",
             (
-                math.cos(ang) * 0.28,
-                0.90 + 0.02 * math.sin(i * 0.9),
-                math.sin(ang) * 0.18,
+                0.08,
+                0.90 + math.cos(ang) * 0.30,
+                math.sin(ang) * 0.30,
             ),
-            (0.12, 0.06, 0.09),
+            (0.05, 0.14, 0.08),
             mats["petal"],
             segments=10,
             rings=6,
         )
         add_bevel(petal, 0.005)
-        rotate(petal, 0.0, 0.0, math.radians(i * 15))
+        rotate(petal, ang, 0.0, 0.0)
 
     for x in (-0.14, 0.14):
         eye = add_uv_sphere("face_eye", (0.18, 0.98, x), (0.055, 0.035, 0.055), mats["eye"], segments=8, rings=5)
@@ -526,7 +547,7 @@ def plant_bark_bulwark(path: Path) -> None:
     shell = add_uv_sphere("shell", (0.0, 0.64, 0.0), (0.34, 0.44, 0.28), mats["shell"], segments=14, rings=8)
     apply_organic_modifiers(shell)
     for i in range(4):
-        add_bevel(add_cube(f"plate_{i}", (0.0, 0.58 + i * 0.05, -0.08 + i * 0.06), (0.34, 0.03, 0.08), mats["bark"]), width=0.005)
+        add_bevel(add_cube(f"plate_{i}", (0.0, 0.50 + i * 0.10, 0.20), (0.24 - 0.03 * i, 0.025, 0.05), mats["bark"]), width=0.005)
 
     cap = add_uv_sphere("cap", (0.0, 1.02, 0), (0.28, 0.08, 0.20), mats["cap"], segments=12, rings=4)
     add_bevel(cap, 0.006)
@@ -686,7 +707,7 @@ def plant_blast_berry(path: Path) -> None:
         )
         rotate(flame, math.radians(-8), 0, math.radians(i * 20))
 
-    add_facial_feature(x=0.26, y=0.96, z=0.02, eye_mat=mats["fuse"], pupil_mat=mats["core"], mouth_mat=mats["skin"])
+    add_facial_feature(x=0.24, y=0.58, z=0.10, eye_mat=mats["fuse"], pupil_mat=mats["core"], mouth_mat=mats["skin"])
     export_glb(path)
 
 
@@ -761,10 +782,26 @@ def monster_core(mats: dict[str, bpy.types.Material], scale: float = 1.0) -> Non
     head = add_uv_sphere("head", (-0.02 * scale, 1.18 * scale, 0.0), (0.17 * scale, 0.18 * scale, 0.15 * scale), mats["skin"], segments=12, rings=6)
     rotate(head, 0, 0, 0)
 
-    for x in (-0.16, 0.16):
-        limb = add_cylinder("arm", (0.0 + x * 0.55, 0.82 * scale, 0), 0.045 * scale, 0.56 * scale, mats["cloth"], vertices=10)
-        rotate(limb, 0, 0, math.radians(20 if x < 0 else -20))
+    for i, z in enumerate((-0.10, 0.10)):
+        limb = add_cylinder(
+            "arm",
+            (-0.28 * scale, (1.00 - 0.04 * i) * scale, z * scale),
+            0.045 * scale,
+            0.52 * scale,
+            mats["cloth"],
+            vertices=10,
+        )
+        rotate(limb, 0, 0, math.radians(-80 - 6 * i))
         add_bevel(limb, 0.006)
+        hand = add_uv_sphere(
+            "hand",
+            (-0.52 * scale, (0.97 - 0.04 * i) * scale, z * scale),
+            (0.055 * scale, 0.05 * scale, 0.055 * scale),
+            mats["skin"],
+            segments=8,
+            rings=5,
+        )
+        add_bevel(hand, 0.004)
 
     for x in (-0.12, 0.12):
         leg = add_cylinder("leg", (x * scale, 0.28 * scale, 0.0), 0.058 * scale, 0.58 * scale, mats["dark"], vertices=10)
@@ -822,7 +859,7 @@ def monster_buckethead(path: Path) -> None:
     mats = monster_materials()["buckethead"]
     monster_core(mats)
     bucket = add_cylinder("bucket_helmet", (-0.02, 1.35, 0.0), 0.19, 0.24, mats["bucket"], vertices=18)
-    rotate(bucket, 0, 0, math.radians(-90))
+    rotate(bucket, 0, 0, math.radians(-8))
     rim = add_torus = add_cylinder("bucket_rim", (-0.01, 1.40, 0.0), 0.205, 0.02, mats["rim"], vertices=18)
     rotate(add_torus, 0.0, 0.0, 0)
     add_bevel(bucket, 0.005)
@@ -838,11 +875,11 @@ def monster_brute(path: Path) -> None:
     mats = monster_materials()["brute"]
     monster_core(mats, scale=1.18)
 
-    shoulders = add_cube("shoulders", (0.0, 1.0, 0.0), (0.48, 0.13, 0.18), mats["plate"])
+    shoulders = add_cube("shoulders", (0.02, 1.24, 0.0), (0.34, 0.09, 0.20), mats["plate"])
     add_bevel(shoulders, 0.008)
 
     for i, x in enumerate((-0.2, 0.2)):
-        gauntlet = add_cube(f"gauntlet_{i}", (x, 0.77, 0.00), (0.13, 0.06, 0.16), mats["clasp"])
+        gauntlet = add_cube(f"gauntlet_{i}", (-0.55, 1.12, x * 0.6), (0.09, 0.07, 0.10), mats["clasp"])
         rotate(gauntlet, 0, 0, math.radians(12 if x < 0 else -12))
 
     for z in (-0.17, 0.17):
@@ -857,15 +894,11 @@ def monster_healer(path: Path) -> None:
     mats = monster_materials()["healer"]
     monster_core(mats)
 
-    orb = add_uv_sphere("lantern_orb", (0.24, 1.03, 0.16), (0.11, 0.13, 0.11), mats["orb"], segments=12, rings=6)
-    rotate(orb, 0, 0, 0)
-    staff = add_cylinder("healer_staff", (0.32, 0.78, 0.17), 0.025, 0.86, mats["gold"], vertices=10)
-    rotate(staff, 0, 0, math.radians(16))
+    staff = add_cylinder("healer_staff", (-0.38, 0.80, 0.14), 0.025, 0.90, mats["gold"], vertices=10)
+    rotate(staff, 0, 0, math.radians(-10))
     add_bevel(staff, 0.004)
-    bead = add_uv_sphere("staff_bead", (0.45, 1.31, 0.18), (0.02, 0.03, 0.02), mats["orb"], segments=8, rings=4)
-    cross = add_cube("cross", (0.32, 1.02, 0.22), (0.06, 0.01, 0.03), mats["dark"])
-    rotate(cross, 0, 0, math.radians(45))
-    add_cube("cross2", (0.32, 1.02, 0.16), (0.01, 0.01, 0.06), mats["dark"])
+    add_uv_sphere("lantern_orb", (-0.45, 1.30, 0.14), (0.10, 0.12, 0.10), mats["orb"], segments=12, rings=6)
+    add_uv_sphere("staff_bead", (-0.45, 1.44, 0.14), (0.02, 0.03, 0.02), mats["orb"], segments=8, rings=4)
     export_glb(path)
 
 
@@ -875,15 +908,14 @@ def monster_jumper(path: Path) -> None:
     monster_core(mats, scale=0.96)
 
     for i in range(4):
-        coil = add_torus = add_cylinder(
+        coil = add_cylinder(
             f"spring_{i}",
-            (0.0, 0.12 + i * 0.06, 0.07 * (i - 1.5)),
-            0.095,
-            0.12,
+            (0.0, 0.10 + i * 0.07, 0.0),
+            0.10 + 0.012 * (i % 2),
+            0.035,
             mats["spring"],
             vertices=16,
         )
-        rotate(coil, math.radians(90), 0, 0)
         add_bevel(coil, 0.004)
 
     for i in range(2):
@@ -916,18 +948,18 @@ def monster_frostbite(path: Path) -> None:
     mats = monster_materials()["frostbite"]
     monster_core(mats)
 
-    for i in range(7):
+    for i in range(5):
         back_spike = add_cone(
             f"ice_spike_{i}",
-            (-0.16 + i * 0.06, 1.28, -0.16 + i * 0.053),
-            0.035,
+            (0.14 + i * 0.02, 1.34 - i * 0.15, 0.0),
+            0.045 - 0.004 * i,
             0.0,
-            0.19,
+            0.20,
             mats["ice"],
             vertices=8,
             smooth=True,
         )
-        rotate(back_spike, math.radians(12), 0, math.radians(i * 7))
+        rotate(back_spike, 0, 0, math.radians(-38))
 
     frost_cap = add_uv_sphere("ice_cap", (-0.01, 1.50, 0.0), (0.16, 0.12, 0.16), mats["skin"], segments=10, rings=6)
     add_subsurf(frost_cap, 1)
