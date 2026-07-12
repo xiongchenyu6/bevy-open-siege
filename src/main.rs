@@ -5515,6 +5515,92 @@ fn restart_input(keyboard: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState
     }
 }
 
+fn spawn_greenhouse_dressing(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    let grass_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.11, 0.21, 0.12),
+        perceptual_roughness: 0.95,
+        ..default()
+    });
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(44.0, 0.16, 28.0))),
+        MeshMaterial3d(grass_mat),
+        Transform::from_xyz(0.0, -0.19, -2.0),
+        GameEntity,
+        Name::new("Greenhouse Ground"),
+    ));
+
+    let wood_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.32, 0.21, 0.11),
+        perceptual_roughness: 0.8,
+        ..default()
+    });
+    let post_mesh = meshes.add(Cuboid::new(0.18, 3.4, 0.18));
+    for x in [-6.8, -3.4, 0.0, 3.4, 6.8] {
+        commands.spawn((
+            Mesh3d(post_mesh.clone()),
+            MeshMaterial3d(wood_mat.clone()),
+            Transform::from_xyz(x, 1.5, -4.9),
+            GameEntity,
+            Name::new("Greenhouse Post"),
+        ));
+    }
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(14.2, 0.18, 0.22))),
+        MeshMaterial3d(wood_mat.clone()),
+        Transform::from_xyz(0.0, 3.2, -4.9),
+        GameEntity,
+        Name::new("Greenhouse Beam"),
+    ));
+
+    let glass_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.62, 0.86, 0.88, 0.16),
+        perceptual_roughness: 0.12,
+        alpha_mode: AlphaMode::Blend,
+        cull_mode: None,
+        ..default()
+    });
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(13.9, 3.0, 0.05))),
+        MeshMaterial3d(glass_mat),
+        Transform::from_xyz(0.0, 1.6, -4.95),
+        GameEntity,
+        Name::new("Greenhouse Glass"),
+    ));
+
+    let pot_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.58, 0.31, 0.18),
+        perceptual_roughness: 0.85,
+        ..default()
+    });
+    let bush_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.20, 0.42, 0.18),
+        perceptual_roughness: 0.75,
+        ..default()
+    });
+    let pot_mesh = meshes.add(Cylinder::new(0.32, 0.5));
+    let bush_mesh = meshes.add(Sphere::new(0.48));
+    for (x, z) in [(-5.6, -5.9), (-1.8, -6.1), (2.4, -5.8), (6.0, -6.0)] {
+        commands.spawn((
+            Mesh3d(pot_mesh.clone()),
+            MeshMaterial3d(pot_mat.clone()),
+            Transform::from_xyz(x, 0.15, z),
+            GameEntity,
+            Name::new("Backdrop Pot"),
+        ));
+        commands.spawn((
+            Mesh3d(bush_mesh.clone()),
+            MeshMaterial3d(bush_mat.clone()),
+            Transform::from_xyz(x, 0.75, z),
+            GameEntity,
+            Name::new("Backdrop Bush"),
+        ));
+    }
+}
+
 fn start_game(
     mut commands: Commands,
     mut state: ResMut<BoardState>,
@@ -5586,6 +5672,8 @@ fn start_game(
             Name::new("Soil Border"),
         ));
     }
+
+    spawn_greenhouse_dressing(&mut commands, &mut meshes, &mut materials);
 
     let cursor_mat = materials.add(StandardMaterial {
         base_color: Color::srgba(1.0, 0.95, 0.28, 0.62),
