@@ -38,22 +38,39 @@
   <body>
     <div id="loading">
       <h1>Bevy Open Siege</h1>
-      <div class="bar">Loading the greenhouse… (~20 MB, first visit takes a moment)</div>
+      <div class="bar">Loading the greenhouse… (~10 MB, first visit takes a moment)</div>
     </div>
     <script type="module">
-      import init from "./bevy_open_siege.js";
-      init()
-        .catch((error) => {
-          // winit uses a JS exception for control flow on startup; anything else is real.
-          if (!error.message?.startsWith("Using exceptions for control flow")) {
-            document.getElementById("loading").innerHTML =
-              `<h1>Failed to start</h1><div class="bar">${error}</div>`;
-            throw error;
+      const loading = document.getElementById("loading");
+      const bar = loading.querySelector(".bar");
+
+      async function pickBackend() {
+        // One wasm binary supports one backend (bevy webgl2 XOR webgpu),
+        // so probe WebGPU and pick the matching bundle at runtime.
+        try {
+          if (navigator.gpu && (await navigator.gpu.requestAdapter())) {
+            return "webgpu";
           }
-        })
-        .finally(() => {
-          document.getElementById("loading")?.remove();
-        });
+        } catch (_) {
+          /* fall through to WebGL2 */
+        }
+        return "webgl2";
+      }
+
+      const backend = await pickBackend();
+      try {
+        const { default: init } = await import(`./bevy_open_siege_${backend}.js`);
+        await init();
+        loading.remove();
+      } catch (error) {
+        // winit uses a JS exception for control flow on startup; anything else is real.
+        if (error?.message?.startsWith("Using exceptions for control flow")) {
+          loading.remove();
+        } else {
+          bar.textContent = `Failed to start (${backend}): ${error}`;
+          throw error;
+        }
+      }
     </script>
   </body>
 </html>

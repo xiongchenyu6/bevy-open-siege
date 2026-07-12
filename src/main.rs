@@ -5391,12 +5391,21 @@ fn spawn_menu(
 }
 
 fn ui_panel_image(asset_server: &AssetServer, texture: &'static str) -> ImageNode {
-    ImageNode::new(asset_server.load(texture)).with_mode(NodeImageMode::Sliced(TextureSlicer {
-        border: BorderRect::all(24.0),
-        center_scale_mode: SliceScaleMode::Stretch,
-        sides_scale_mode: SliceScaleMode::Stretch,
-        max_corner_scale: 1.0,
-    }))
+    // The texture-slice UI shader fails to compile on some WebGL2 drivers
+    // (ANGLE/Vulkan), panicking at pipeline creation; stretch the panel on web.
+    #[cfg(target_arch = "wasm32")]
+    {
+        ImageNode::new(asset_server.load(texture))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        ImageNode::new(asset_server.load(texture)).with_mode(NodeImageMode::Sliced(TextureSlicer {
+            border: BorderRect::all(24.0),
+            center_scale_mode: SliceScaleMode::Stretch,
+            sides_scale_mode: SliceScaleMode::Stretch,
+            max_corner_scale: 1.0,
+        }))
+    }
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -7413,7 +7422,7 @@ mod tests {
         assert!(report.contains("sun pickup budget: 47"));
         assert!(report.contains("visual effect budget: 45"));
         assert!(report.contains("estimated dynamic entities: 275/320"));
-        assert!(report.contains("embedded asset bytes: 20129904/25000000"));
+        assert!(report.contains("embedded asset bytes: 16424690/25000000"));
         assert!(report.contains("checked viewport floor: compact-540p 960x540"));
         assert!(report.contains("manual performance QA still required"));
     }

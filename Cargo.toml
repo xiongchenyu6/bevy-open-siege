@@ -3,6 +3,10 @@ name = "bevy_open_siege"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# Web-only: switch the wasm build from WebGL2 to WebGPU (bevy allows one per binary).
+webgpu = ["bevy/webgpu"]
+
 [dependencies]
 bevy = { version = "0.18.1", default-features = false, features = [
     "async_executor",
