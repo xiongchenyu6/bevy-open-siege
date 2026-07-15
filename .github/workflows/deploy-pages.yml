@@ -47,7 +47,7 @@ jobs:
 
       - name: Assemble web bundle
         run: |
-          cp web/index.html web-dist/
+          cp web/index.html web/favicon.png web-dist/
           cp -r assets web-dist/assets
 
       - uses: actions/upload-pages-artifact@v3

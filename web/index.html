@@ -3,7 +3,18 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Bevy Open Siege</title>
+    <title>Bevy Open Siege — lane-defense in a greenhouse</title>
+    <meta
+      name="description"
+      content="Place greenhouse defenders, manage sun income, and survive escalating undead waves. A free, open-source lane-defense game built with Bevy — playable in your browser."
+    />
+    <meta property="og:title" content="Bevy Open Siege" />
+    <meta
+      property="og:description"
+      content="Lane-defense strategy in a greenhouse — play free in your browser."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/png" href="./favicon.png" />
     <style>
       html,
       body {
@@ -27,22 +38,40 @@
       #loading {
         position: absolute;
         text-align: center;
+        width: min(420px, 80vw);
       }
       #loading .bar {
         margin-top: 1em;
         font-size: 0.9em;
-        opacity: 0.7;
+        opacity: 0.75;
+      }
+      #progress {
+        margin: 1.2em auto 0;
+        height: 6px;
+        width: 100%;
+        border-radius: 3px;
+        background: #1d3325;
+        overflow: hidden;
+      }
+      #progress > div {
+        height: 100%;
+        width: 0%;
+        border-radius: 3px;
+        background: #8fce6e;
+        transition: width 0.15s ease-out;
       }
     </style>
   </head>
   <body>
     <div id="loading">
       <h1>Bevy Open Siege</h1>
-      <div class="bar">Loading the greenhouse… (~10 MB, first visit takes a moment)</div>
+      <div id="progress"><div></div></div>
+      <div class="bar">Loading the greenhouse…</div>
     </div>
     <script type="module">
       const loading = document.getElementById("loading");
       const bar = loading.querySelector(".bar");
+      const fill = document.querySelector("#progress > div");
 
       async function pickBackend() {
         // One wasm binary supports one backend (bevy webgl2 XOR webgpu),
@@ -57,10 +86,36 @@
         return "webgl2";
       }
 
+      function fetchWithProgress(url) {
+        // Count bytes as they stream so the bar reflects the real download.
+        return fetch(url).then((resp) => {
+          const total = Number(resp.headers.get("content-length")) || 0;
+          let loaded = 0;
+          const stream = new ReadableStream({
+            async start(controller) {
+              const reader = resp.body.getReader();
+              for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                loaded += value.byteLength;
+                // total is the compressed size while loaded counts decompressed
+                // bytes, so clamp instead of trusting the ratio.
+                const pct = total ? Math.min(99, (loaded / total) * 100) : 0;
+                fill.style.width = `${pct}%`;
+                bar.textContent = `Loading the greenhouse… ${(loaded / 1048576).toFixed(1)} MB`;
+                controller.enqueue(value);
+              }
+              controller.close();
+            },
+          });
+          return new Response(stream, { headers: resp.headers });
+        });
+      }
+
       const backend = await pickBackend();
       try {
         const { default: init } = await import(`./bevy_open_siege_${backend}.js`);
-        await init();
+        await init({ module_or_path: fetchWithProgress(`./bevy_open_siege_${backend}_bg.wasm`) });
         loading.remove();
       } catch (error) {
         // winit uses a JS exception for control flow on startup; anything else is real.

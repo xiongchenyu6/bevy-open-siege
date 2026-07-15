@@ -3253,7 +3253,7 @@ fn layout_audit_report() -> Result<String, String> {
         audit_text_block(
             &mut lines,
             &format!("{lang} pause panel"),
-            &pause_text(locale, &settings),
+            &pause_text(locale, language, &settings),
             96,
             2,
         )?;
@@ -6374,7 +6374,7 @@ fn update_pause_ui(
                     ))
                     .with_children(|parent| {
                         parent.spawn((
-                            Text::new(pause_text(locale, &settings)),
+                            Text::new(pause_text(locale, language.current, &settings)),
                             TextFont {
                                 font_size: 20.0,
                                 ..default()
@@ -6421,7 +6421,7 @@ fn update_pause_ui(
     } else if pause.paused && (settings.is_changed() || language.is_changed()) {
         let locale = localization.text(language.current);
         for mut text in &mut text_query {
-            **text = pause_text(locale, &settings);
+            **text = pause_text(locale, language.current, &settings);
         }
         for (mut text, action) in &mut button_labels {
             **text = match action {
@@ -6466,11 +6466,22 @@ fn pause_menu_buttons(
     }
 }
 
-fn pause_text(locale: &LocaleText, settings: &GameSettings) -> String {
+fn pause_text(locale: &LocaleText, language: Language, settings: &GameSettings) -> String {
+    let (resume, fullscreen, volume, lang_label, on, off) = match language {
+        Language::English => (
+            "P resume",
+            "F fullscreen",
+            "+/- volume",
+            "L language",
+            "on",
+            "off",
+        ),
+        Language::Chinese => ("P 继续", "F 全屏", "+/- 音量", "L 语言", "开", "关"),
+    };
     format!(
-        "{}\nP resume | F fullscreen: {} | +/- volume: {:.0}% | L language",
+        "{}\n{resume} | {fullscreen}: {} | {volume}: {:.0}% | {lang_label}",
         locale.title,
-        if settings.fullscreen { "on" } else { "off" },
+        if settings.fullscreen { on } else { off },
         settings.master_volume * 100.0
     )
 }
