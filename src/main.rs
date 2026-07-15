@@ -97,6 +97,7 @@ const ENV_SOIL_BORDER_PNG: &[u8] = embedded_bytes!("../assets/art/environment/so
 const UI_MENU_PANEL_PNG: &[u8] = embedded_bytes!("../assets/art/ui/menu-panel.png");
 const UI_HUD_PANEL_PNG: &[u8] = embedded_bytes!("../assets/art/ui/hud-panel.png");
 const UI_END_PANEL_PNG: &[u8] = embedded_bytes!("../assets/art/ui/end-panel.png");
+const FONT_CJK_TTF: &[u8] = embedded_bytes!("../assets/fonts/SarasaMonoSC-subset.ttf");
 const AUDIO_MUSIC_LOOP: &str = "audio/music-loop.wav";
 const AUDIO_PLANT_PLACE: &str = "audio/plant-place.wav";
 const AUDIO_SHOOT: &str = "audio/shoot.wav";
@@ -116,6 +117,7 @@ const ENV_SOIL_BORDER: &str = "art/environment/soil-border.png";
 const UI_MENU_PANEL: &str = "art/ui/menu-panel.png";
 const UI_HUD_PANEL: &str = "art/ui/hud-panel.png";
 const UI_END_PANEL: &str = "art/ui/end-panel.png";
+const FONT_CJK: &str = "fonts/SarasaMonoSC-subset.ttf";
 const AUDIO_ASSETS: [(&str, &[u8]); 7] = [
     ("assets/audio/music-loop.wav", MUSIC_LOOP_WAV),
     ("assets/audio/plant-place.wav", PLANT_PLACE_WAV),
@@ -416,6 +418,11 @@ impl Default for GameSettings {
 #[derive(Resource, Default)]
 struct PauseState {
     paused: bool,
+}
+
+#[derive(Resource)]
+struct UiFonts {
+    cjk: Handle<Font>,
 }
 
 #[derive(Resource, Default)]
@@ -1170,6 +1177,7 @@ fn embedded_asset_for_path(path: &str) -> Option<&'static [u8]> {
         "assets/art/ui/menu-panel.png" => Some(UI_MENU_PANEL_PNG),
         "assets/art/ui/hud-panel.png" => Some(UI_HUD_PANEL_PNG),
         "assets/art/ui/end-panel.png" => Some(UI_END_PANEL_PNG),
+        "assets/fonts/SarasaMonoSC-subset.ttf" => Some(FONT_CJK_TTF),
         "assets/data/levels.ron" => Some(LEVELS_RON.as_bytes()),
         "assets/i18n/en.ron" => Some(EN_RON.as_bytes()),
         "assets/i18n/zh.ron" => Some(ZH_RON.as_bytes()),
@@ -1207,6 +1215,7 @@ fn runtime_asset_paths() -> Vec<&'static str> {
         UI_MENU_PANEL,
         UI_HUD_PANEL,
         UI_END_PANEL,
+        FONT_CJK,
     ]);
     paths.extend(PlantKind::ALL.iter().map(|plant| plant.sprite_path()));
     paths.extend(ZombieKind::ALL.iter().map(|zombie| zombie.sprite_path()));
@@ -1222,6 +1231,7 @@ fn validate_runtime_asset_manifest_coverage(manifest: &AssetManifest) -> Result<
             .art
             .iter()
             .chain(manifest.audio.iter())
+            .chain(manifest.data.iter())
             .any(|entry| entry.path == manifest_path);
         if !listed {
             return Err(format!(
@@ -1412,6 +1422,12 @@ fn validate_embedded_asset_format(path: &str, contents: &[u8]) -> Result<(), Str
     } else if path.ends_with(".ron") {
         if std::str::from_utf8(contents).is_err() {
             return Err(format!("asset manifest path {path} is not valid UTF-8 RON"));
+        }
+    } else if path.ends_with(".ttf") {
+        if contents.len() < 12 || !contents.starts_with(&[0x00, 0x01, 0x00, 0x00]) {
+            return Err(format!(
+                "asset manifest path {path} is not a valid TrueType font"
+            ));
         }
     } else if path.ends_with(".desktop") {
         let Ok(desktop) = std::str::from_utf8(contents) else {
@@ -4677,10 +4693,12 @@ fn main() {
         .register_type::<GltfMaterialName>()
         .init_state::<GameState>()
         .add_systems(Startup, ensure_primary_window_size)
+        .add_systems(PreStartup, install_ui_font)
         .add_systems(Startup, setup_camera)
         .add_systems(Startup, setup_store_screenshot_scene)
         .add_systems(Startup, apply_saved_window_settings)
         .add_systems(Startup, setup_audio)
+        .add_systems(Startup, setup_ui_fonts)
         .add_systems(
             Update,
             (
@@ -4688,6 +4706,7 @@ fn main() {
                 settings_input,
                 apply_audio_volume,
                 toggle_pause,
+                apply_language_font,
             ),
         )
         .add_systems(OnEnter(GameState::Menu), spawn_menu)
@@ -5107,6 +5126,17 @@ fn handle_cli_args() -> bool {
     }
 }
 
+// CJK-capable monospace bundled for both targets (the bevy default font has
+// no Chinese glyphs); replacing the default handle restyles every Text node.
+const GAME_FONT_TTF: &[u8] = include_bytes!("../assets/fonts/SarasaMonoSC-subset.ttf");
+
+fn install_ui_font(mut fonts: ResMut<Assets<Font>>) {
+    let font = Font::try_from_bytes(GAME_FONT_TTF.to_vec()).expect("bundled UI font must parse");
+    fonts
+        .insert(Handle::<Font>::default().id(), font)
+        .expect("default font slot must accept the bundled UI font");
+}
+
 fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
@@ -5475,6 +5505,38 @@ fn settings_input(
     }
     if changed {
         save_progress(language.current, &progress, &settings);
+    }
+}
+
+fn setup_ui_fonts(mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands.insert_resource(UiFonts {
+        cjk: asset_server.load(FONT_CJK),
+    });
+}
+
+// The bundled default font has no CJK glyphs, so Chinese UI text swaps to an
+// embedded Sarasa Mono SC subset; English keeps the stock font.
+#[allow(clippy::type_complexity)]
+fn apply_language_font(
+    language: Res<LanguageSettings>,
+    fonts: Res<UiFonts>,
+    mut texts: ParamSet<(
+        Query<&mut TextFont>,
+        Query<&mut TextFont, Added<TextFont>>,
+    )>,
+) {
+    let font = match language.current {
+        Language::Chinese => fonts.cjk.clone(),
+        Language::English => Handle::default(),
+    };
+    if language.is_changed() {
+        for mut text_font in texts.p0().iter_mut() {
+            text_font.font = font.clone();
+        }
+    } else if language.current == Language::Chinese {
+        for mut text_font in texts.p1().iter_mut() {
+            text_font.font = font.clone();
+        }
     }
 }
 
@@ -8092,7 +8154,7 @@ mod tests {
         assert!(report.contains("wav assets: 7"));
         assert!(report.contains("svg assets: 2"));
         assert!(report.contains("glb assets: 20"));
-        assert!(report.contains("metadata assets: 5"));
+        assert!(report.contains("metadata assets: 6"));
         assert!(report.contains("production art assets: 56"));
     }
 
@@ -8296,7 +8358,7 @@ mod tests {
         assert!(report.contains("sun pickup budget: 47"));
         assert!(report.contains("visual effect budget: 45"));
         assert!(report.contains("estimated dynamic entities: 275/320"));
-        assert!(report.contains("embedded asset bytes: 16940479/25000000"));
+        assert!(report.contains("embedded asset bytes: 17034335/25000000"));
         assert!(report.contains("checked viewport floor: compact-540p 960x540"));
         assert!(report.contains("manual performance QA still required"));
     }
@@ -9547,6 +9609,7 @@ mod tests {
                 + ENVIRONMENT_ASSETS.len()
                 + UI_ASSETS.len()
                 + AUDIO_ASSETS.len()
+                + 1 // CJK font
         );
         validate_runtime_asset_manifest_coverage(&manifest)
             .expect("all runtime asset paths should be listed in the asset manifest");

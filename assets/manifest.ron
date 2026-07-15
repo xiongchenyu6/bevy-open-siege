@@ -483,6 +483,13 @@
       status: "production_data",
     ),
     (
+      id: "font_cjk",
+      path: "assets/fonts/SarasaMonoSC-subset.ttf",
+      kind: "ttf",
+      usage: "runtime CJK font subset (Sarasa Mono SC, OFL 1.1) for Chinese UI text",
+      status: "production_data",
+    ),
+    (
       id: "linux_desktop_entry",
       path: "assets/linux/bevy-open-siege.desktop",
       kind: "desktop",
