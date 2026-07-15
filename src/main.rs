@@ -947,6 +947,7 @@ impl ZombieKind {
         Self::Frostbite,
         Self::Gargantuar,
     ];
+    const ALL_SLICE: &'static [Self] = &Self::ALL;
 
     fn index(self) -> usize {
         match self {
@@ -3965,8 +3966,99 @@ fn audit_balance() -> Result<BalanceAuditReport, String> {
     Ok(BalanceAuditReport { levels: report })
 }
 
-fn zombie_pool_for_wave(wave: u32, final_wave: bool) -> Vec<ZombieKind> {
-    let mut pool = match wave {
+// Each level unlocks one new zombie kind, themed after its title, so the
+// campaign teaches enemies one at a time instead of front-loading the roster.
+fn level_zombie_roster(level_index: usize) -> &'static [ZombieKind] {
+    const ROSTERS: [&[ZombieKind]; 10] = [
+        // 01 greenhouse_morning: basics only
+        &[ZombieKind::Walker, ZombieKind::Conehead],
+        // 02 foggy_rows: + runner
+        &[ZombieKind::Walker, ZombieKind::Conehead, ZombieKind::Runner],
+        // 03 midnight_pressure: + buckethead
+        &[
+            ZombieKind::Walker,
+            ZombieKind::Conehead,
+            ZombieKind::Runner,
+            ZombieKind::Buckethead,
+        ],
+        // 04 sunless_lane: + jumper
+        &[
+            ZombieKind::Walker,
+            ZombieKind::Conehead,
+            ZombieKind::Runner,
+            ZombieKind::Buckethead,
+            ZombieKind::Jumper,
+        ],
+        // 05 bucket_barrage: + brute
+        &[
+            ZombieKind::Walker,
+            ZombieKind::Conehead,
+            ZombieKind::Runner,
+            ZombieKind::Buckethead,
+            ZombieKind::Jumper,
+            ZombieKind::Brute,
+        ],
+        // 06 healer_column: + healer
+        &[
+            ZombieKind::Walker,
+            ZombieKind::Conehead,
+            ZombieKind::Runner,
+            ZombieKind::Buckethead,
+            ZombieKind::Jumper,
+            ZombieKind::Brute,
+            ZombieKind::Healer,
+        ],
+        // 07 frost_front: + frostbite
+        &[
+            ZombieKind::Walker,
+            ZombieKind::Conehead,
+            ZombieKind::Runner,
+            ZombieKind::Buckethead,
+            ZombieKind::Jumper,
+            ZombieKind::Brute,
+            ZombieKind::Healer,
+            ZombieKind::Frostbite,
+        ],
+        // 08 digger_underpass: + digger
+        &[
+            ZombieKind::Walker,
+            ZombieKind::Conehead,
+            ZombieKind::Runner,
+            ZombieKind::Buckethead,
+            ZombieKind::Jumper,
+            ZombieKind::Brute,
+            ZombieKind::Healer,
+            ZombieKind::Frostbite,
+            ZombieKind::Digger,
+        ],
+        // 09 gargantuar_gate and 10 last_greenhouse: everything
+        ZombieKind::ALL_SLICE,
+        ZombieKind::ALL_SLICE,
+    ];
+    ROSTERS
+        .get(level_index)
+        .copied()
+        .unwrap_or(ZombieKind::ALL_SLICE)
+}
+
+fn zombie_pool_for_wave(level_index: usize, wave: u32, final_wave: bool) -> Vec<ZombieKind> {
+    let roster = level_zombie_roster(level_index);
+    let mut pool = raw_zombie_pool_for_wave(wave);
+    pool.retain(|kind| roster.contains(kind));
+    if pool.is_empty() {
+        pool.push(*roster.last().expect("level roster must not be empty"));
+    }
+    if final_wave
+        && roster.contains(&ZombieKind::Gargantuar)
+        && !pool.contains(&ZombieKind::Gargantuar)
+    {
+        pool.push(ZombieKind::Gargantuar);
+    }
+    pool
+}
+
+fn raw_zombie_pool_for_wave(wave: u32) -> Vec<ZombieKind> {
+    let pool = match wave {
         1 => vec![ZombieKind::Walker],
         2 => vec![ZombieKind::Walker, ZombieKind::Conehead],
         3 => vec![ZombieKind::Walker, ZombieKind::Conehead, ZombieKind::Runner],
@@ -4012,10 +4104,6 @@ fn zombie_pool_for_wave(wave: u32, final_wave: bool) -> Vec<ZombieKind> {
             ZombieKind::Gargantuar,
         ],
     };
-
-    if final_wave && !pool.contains(&ZombieKind::Gargantuar) {
-        pool.push(ZombieKind::Gargantuar);
-    }
     pool
 }
 
@@ -4063,7 +4151,7 @@ fn simulate_campaign() -> Result<CampaignSimulationReport, String> {
         let mut projected_score_floor = 0;
         for wave in 1..=level.final_wave {
             let is_final_wave = wave == level.final_wave;
-            let pool = zombie_pool_for_wave(wave, is_final_wave);
+            let pool = zombie_pool_for_wave(index, wave, is_final_wave);
             for zombie in &pool {
                 covered_zombies[zombie.index()] = true;
                 level_zombies[zombie.index()] = true;
@@ -4127,11 +4215,11 @@ fn simulate_campaign() -> Result<CampaignSimulationReport, String> {
     })
 }
 
-fn projected_level_score_floor(level: &LevelConfig) -> Result<u32, String> {
+fn projected_level_score_floor(level_index: usize, level: &LevelConfig) -> Result<u32, String> {
     let mut projected_score = 0;
     for wave in 1..=level.final_wave {
         let is_final_wave = wave == level.final_wave;
-        let pool = zombie_pool_for_wave(wave, is_final_wave);
+        let pool = zombie_pool_for_wave(level_index, wave, is_final_wave);
         let spawn_count = if is_final_wave {
             level.final_spawn_count
         } else {
@@ -4230,7 +4318,7 @@ fn audit_playthrough() -> Result<PlaythroughAuditReport, String> {
         restart_checks += 1;
 
         let unlock_before = progress.unlocked_levels;
-        let victory_score = projected_level_score_floor(level)?;
+        let victory_score = projected_level_score_floor(index, level)?;
         if victory_score == 0 {
             return Err(format!(
                 "level {} has a zero projected victory score",
@@ -6723,7 +6811,12 @@ fn spawn_zombies(
 
     for _ in 0..count {
         let lane = rng.random_range(0..LANES);
-        let kind = choose_zombie_kind(state.wave, state.final_wave_started, &mut rng);
+        let kind = choose_zombie_kind(
+            state.level_index,
+            state.wave,
+            state.final_wave_started,
+            &mut rng,
+        );
         let (health, speed, damage, radius) = kind.stats(state.wave);
         let sprite_height = if kind == ZombieKind::Gargantuar {
             1.78
@@ -6763,11 +6856,29 @@ fn spawn_zombies(
     }
 }
 
-fn choose_zombie_kind(wave: u32, final_wave: bool, rng: &mut impl Rng) -> ZombieKind {
-    if final_wave && rng.random_bool(0.18) {
+fn choose_zombie_kind(
+    level_index: usize,
+    wave: u32,
+    final_wave: bool,
+    rng: &mut impl Rng,
+) -> ZombieKind {
+    let roster = level_zombie_roster(level_index);
+    if final_wave && roster.contains(&ZombieKind::Gargantuar) && rng.random_bool(0.18) {
         return ZombieKind::Gargantuar;
     }
 
+    // Keep the wave-based weighting, but reroll picks the level has not
+    // introduced yet; fall back to a uniform roster pick.
+    for _ in 0..8 {
+        let kind = raw_choose_zombie_kind(wave, rng);
+        if roster.contains(&kind) {
+            return kind;
+        }
+    }
+    roster[rng.random_range(0..roster.len())]
+}
+
+fn raw_choose_zombie_kind(wave: u32, rng: &mut impl Rng) -> ZombieKind {
     let roll = rng.random_range(0..100);
     match wave {
         1 => ZombieKind::Walker,
