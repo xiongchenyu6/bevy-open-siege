@@ -48,10 +48,10 @@
     "redirects attackers",
   ],
   hints: [
-    "Plant a Sunbloom first (press 2, then Space or click a tile) — sun fuels everything",
+    "Plant a Sunbloom first (press 2, then Space or click a tile) - sun fuels everything",
     "Collect the floating sun orbs with C or by clicking them",
     "Plant a Sprout Slinger (press 1) near the left to shoot walkers",
-    "Watch the wave bar up top — survive the final wave to win!",
+    "Watch the wave bar up top - survive the final wave to win!",
   ],
   zombie_labels: [
     "Walker Zombie",

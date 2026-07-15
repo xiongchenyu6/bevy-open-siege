@@ -5592,7 +5592,7 @@ fn spawn_menu(
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(18.0),
+                row_gap: Val::Px(10.0),
                 ..default()
             },
             ui_panel_image(&asset_server, UI_MENU_PANEL),
@@ -5602,7 +5602,7 @@ fn spawn_menu(
             parent.spawn((
                 Text::new(locale.title.clone()),
                 TextFont {
-                    font_size: 58.0,
+                    font_size: 50.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.88, 0.96, 0.68)),
@@ -5611,7 +5611,7 @@ fn spawn_menu(
             parent.spawn((
                 Text::new(locale.menu_help.clone()),
                 TextFont {
-                    font_size: 22.0,
+                    font_size: 17.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.74, 0.84, 0.68)),
@@ -8296,7 +8296,7 @@ mod tests {
         assert!(report.contains("sun pickup budget: 47"));
         assert!(report.contains("visual effect budget: 45"));
         assert!(report.contains("estimated dynamic entities: 275/320"));
-        assert!(report.contains("embedded asset bytes: 16940483/25000000"));
+        assert!(report.contains("embedded asset bytes: 16940479/25000000"));
         assert!(report.contains("checked viewport floor: compact-540p 960x540"));
         assert!(report.contains("manual performance QA still required"));
     }
