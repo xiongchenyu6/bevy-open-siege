@@ -887,6 +887,26 @@ struct VisualEffect {
     lifetime: Timer,
 }
 
+#[derive(Clone, Copy)]
+enum LimbKind {
+    Arm,
+    Leg,
+    Head,
+}
+
+#[derive(Component)]
+struct LimbAnim {
+    base: Quat,
+    kind: LimbKind,
+    phase: f32,
+}
+
+#[derive(Component)]
+struct GrowIn {
+    timer: Timer,
+    target_scale: f32,
+}
+
 struct ProjectileSpec {
     damage: f32,
     speed: f32,
@@ -4510,6 +4530,7 @@ fn main() {
             scene: screenshot_scene,
         })
         .insert_resource(start_async_audio(audio_enabled()))
+        .add_plugins(platform_audio_plugin)
         .insert_resource(level_catalog)
         .insert_resource(localization)
         .insert_resource(progress)
@@ -4569,6 +4590,9 @@ fn main() {
                 move_projectiles,
                 move_and_attack_zombies,
                 animate_units,
+                tag_limbs,
+                animate_limbs,
+                grow_plants,
                 cleanup_dead,
             )
                 .chain()
@@ -4631,8 +4655,17 @@ fn store_screenshot_scene_arg() -> Option<StoreScreenshotScene> {
 }
 
 fn audio_enabled() -> bool {
-    std::env::var_os("BEVY_OPEN_SIEGE_AUDIO").is_some()
-        || std::env::args().any(|arg| arg == "--audio")
+    // Web audio goes through bevy_audio and is gated on first user gesture
+    // instead of the desktop opt-in flag.
+    #[cfg(target_arch = "wasm32")]
+    {
+        return true;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::var_os("BEVY_OPEN_SIEGE_AUDIO").is_some()
+            || std::env::args().any(|arg| arg == "--audio")
+    }
 }
 
 fn handle_cli_args() -> bool {
@@ -5028,12 +5061,95 @@ fn apply_saved_window_settings(
     }
 }
 
+// On web, audio plays through bevy_audio: commands sent to the same channel
+// are drained each frame into AudioPlayer entities (see drain_web_audio).
+#[cfg(target_arch = "wasm32")]
+static WEB_AUDIO_RECEIVER: std::sync::OnceLock<std::sync::Mutex<mpsc::Receiver<AudioCommand>>> =
+    std::sync::OnceLock::new();
+
 #[cfg(target_arch = "wasm32")]
 fn start_async_audio(_enabled: bool) -> AsyncAudio {
+    let (sender, receiver) = mpsc::channel::<AudioCommand>();
+    let _ = WEB_AUDIO_RECEIVER.set(std::sync::Mutex::new(receiver));
     AsyncAudio {
-        enabled: false,
-        sender: None,
+        enabled: true,
+        sender: Some(sender),
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Component)]
+struct WebMusicSink;
+
+// Browsers refuse to start audio before a user gesture, so the startup
+// PlayMusic command is parked until the first key press or click.
+#[cfg(target_arch = "wasm32")]
+fn drain_web_audio(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut music: Query<&mut bevy::audio::AudioSink, With<WebMusicSink>>,
+    mut pending_music: Local<Option<f32>>,
+    mut interacted: Local<bool>,
+) {
+    use bevy::audio::Volume;
+
+    if !*interacted
+        && (keys.get_just_pressed().next().is_some()
+            || mouse.get_just_pressed().next().is_some())
+    {
+        *interacted = true;
+    }
+
+    let Some(receiver) = WEB_AUDIO_RECEIVER.get() else {
+        return;
+    };
+    let Ok(receiver) = receiver.lock() else {
+        return;
+    };
+    while let Ok(command) = receiver.try_recv() {
+        match command {
+            AudioCommand::PlayMusic { master_volume } => {
+                *pending_music = Some(master_volume);
+            }
+            AudioCommand::SetMusicVolume { master_volume } => {
+                if pending_music.is_some() {
+                    *pending_music = Some(master_volume);
+                }
+                for mut sink in music.iter_mut() {
+                    sink.set_volume(Volume::Linear(music_volume_scalar(master_volume)));
+                }
+            }
+            AudioCommand::PlaySound { path, volume } => {
+                if *interacted {
+                    commands.spawn((
+                        AudioPlayer::new(asset_server.load(path)),
+                        PlaybackSettings::DESPAWN
+                            .with_volume(Volume::Linear(volume.clamp(0.0, 1.0))),
+                    ));
+                }
+            }
+        }
+    }
+    drop(receiver);
+
+    if *interacted {
+        if let Some(master_volume) = pending_music.take() {
+            commands.spawn((
+                AudioPlayer::new(asset_server.load(AUDIO_MUSIC_LOOP)),
+                PlaybackSettings::LOOP
+                    .with_volume(Volume::Linear(music_volume_scalar(master_volume))),
+                WebMusicSink,
+            ));
+        }
+    }
+}
+
+fn platform_audio_plugin(app: &mut App) {
+    #[cfg(target_arch = "wasm32")]
+    app.add_systems(Update, drain_web_audio);
+    let _ = app;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -5159,7 +5275,6 @@ fn apply_audio_volume(settings: Res<GameSettings>, audio: Res<AsyncAudio>) {
     );
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn music_volume_scalar(master_volume: f32) -> f32 {
     (master_volume * 0.20).clamp(0.0, 1.0)
 }
@@ -5973,7 +6088,11 @@ fn spawn_plant(
     };
     commands.spawn((
         SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(kind.model_path()))),
-        Transform::from_xyz(col_x(col), 0.04, lane_z(lane)).with_scale(Vec3::splat(1.2)),
+        Transform::from_xyz(col_x(col), 0.04, lane_z(lane)).with_scale(Vec3::splat(0.05)),
+        GrowIn {
+            timer: Timer::from_seconds(0.3, TimerMode::Once),
+            target_scale: 1.2,
+        },
         Plant {
             kind,
             col,
@@ -6711,6 +6830,9 @@ fn choose_zombie_kind(wave: u32, final_wave: bool, rng: &mut impl Rng) -> Zombie
 fn move_projectiles(
     mut commands: Commands,
     time: Res<Time>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
     mut projectiles: Query<(Entity, &mut Projectile, &mut Transform), Without<Zombie>>,
     mut zombies: Query<(Entity, &mut Zombie, &GlobalTransform), Without<Projectile>>,
 ) {
@@ -6748,6 +6870,16 @@ fn move_projectiles(
         }
 
         if hit {
+            spawn_visual_effect(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &asset_server,
+                EFFECT_EXPLOSION,
+                projectile_transform.translation,
+                0.30,
+                0.12,
+            );
             if projectile.pierce == 0 {
                 commands.entity(projectile_entity).despawn();
                 continue;
@@ -6762,6 +6894,7 @@ fn animate_units(
     time: Res<Time>,
     mut plants: Query<(&mut Transform, &Plant), Without<Zombie>>,
     mut zombies: Query<(&mut Transform, &Zombie), Without<Plant>>,
+    mut suns: Query<&mut Transform, (With<SunPickup>, Without<Plant>, Without<Zombie>)>,
 ) {
     let t = time.elapsed_secs();
     for (mut transform, plant) in &mut plants {
@@ -6774,6 +6907,68 @@ fn animate_units(
         let step = (t * 5.0 + phase).sin();
         transform.translation.y = 0.04 + step.abs() * 0.05;
         transform.rotation = Quat::from_rotation_z(step * 0.06);
+    }
+    for mut transform in &mut suns {
+        let phase = transform.translation.x * 3.0 + transform.translation.z;
+        transform.scale = Vec3::splat(1.0 + (t * 4.0 + phase).sin() * 0.10);
+    }
+}
+
+fn tag_limbs(
+    mut commands: Commands,
+    parts: Query<(Entity, &Name, &Transform), (Without<LimbAnim>, With<ChildOf>)>,
+) {
+    for (entity, name, transform) in &parts {
+        let n = name.as_str();
+        let kind = if n.starts_with("arm") {
+            LimbKind::Arm
+        } else if n.starts_with("leg") {
+            LimbKind::Leg
+        } else if n == "head" {
+            LimbKind::Head
+        } else {
+            continue;
+        };
+        let phase = if n.ends_with(".001") {
+            std::f32::consts::PI
+        } else {
+            0.0
+        } + (entity.index().index() % 13) as f32 * 0.53;
+        commands.entity(entity).insert(LimbAnim {
+            base: transform.rotation,
+            kind,
+            phase,
+        });
+    }
+}
+
+fn animate_limbs(time: Res<Time>, mut limbs: Query<(&LimbAnim, &mut Transform)>) {
+    let t = time.elapsed_secs();
+    for (limb, mut transform) in &mut limbs {
+        let swing = match limb.kind {
+            LimbKind::Arm => Quat::from_rotation_z((t * 5.0 + limb.phase).sin() * 0.15),
+            LimbKind::Leg => Quat::from_rotation_z((t * 5.0 + limb.phase).sin() * 0.28),
+            LimbKind::Head => Quat::from_rotation_z((t * 2.3 + limb.phase).sin() * 0.07),
+        };
+        transform.rotation = swing * limb.base;
+    }
+}
+
+fn grow_plants(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut growing: Query<(Entity, &mut GrowIn, &mut Transform)>,
+) {
+    for (entity, mut grow, mut transform) in &mut growing {
+        grow.timer.tick(time.delta());
+        if grow.timer.is_finished() {
+            transform.scale = Vec3::splat(grow.target_scale);
+            commands.entity(entity).remove::<GrowIn>();
+            continue;
+        }
+        let p = grow.timer.fraction();
+        let pop = 1.0 + 0.12 * (p * std::f32::consts::PI).sin();
+        transform.scale = Vec3::splat(grow.target_scale * p * (1.8 - 0.8 * p) * pop);
     }
 }
 
@@ -6884,19 +7079,42 @@ fn collect_sun(
 fn cleanup_dead(
     mut commands: Commands,
     mut state: ResMut<BoardState>,
-    plants: Query<(Entity, &Plant)>,
-    zombies: Query<(Entity, &Zombie)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+    plants: Query<(Entity, &Plant, &Transform)>,
+    zombies: Query<(Entity, &Zombie, &Transform)>,
     settings: Res<GameSettings>,
     audio: Res<AsyncAudio>,
 ) {
-    for (entity, plant) in &plants {
+    for (entity, plant, transform) in &plants {
         if plant.health <= 0.0 {
+            spawn_visual_effect(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &asset_server,
+                EFFECT_EXPLOSION,
+                transform.translation,
+                0.55,
+                0.22,
+            );
             commands.entity(entity).despawn();
         }
     }
-    for (entity, zombie) in &zombies {
+    for (entity, zombie, transform) in &zombies {
         if zombie.health <= 0.0 {
             state.score += zombie.kind.score();
+            spawn_visual_effect(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &asset_server,
+                EFFECT_EXPLOSION,
+                transform.translation,
+                0.85,
+                0.30,
+            );
             commands.entity(entity).despawn();
             play_sound(&audio, &settings, AUDIO_MONSTER_DOWN, 0.42);
         }
