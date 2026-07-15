@@ -353,6 +353,7 @@ struct BoardState {
     spawn_timer: Timer,
     sky_sun_timer: Timer,
     wave_timer: Timer,
+    grace_timer: Timer,
     final_wave_started: bool,
 }
 
@@ -417,6 +418,13 @@ struct PauseState {
     paused: bool,
 }
 
+#[derive(Resource, Default)]
+struct OnboardingState {
+    step: usize,
+    timer: Timer,
+    done: bool,
+}
+
 #[derive(Resource, Clone)]
 struct LevelCatalog {
     levels: Vec<LevelConfig>,
@@ -461,6 +469,10 @@ struct LocaleText {
     victory: String,
     retry: String,
     play_again: String,
+    pause_resume: String,
+    pause_restart: String,
+    pause_quit: String,
+    hints: Vec<String>,
     locked_level: String,
     level: String,
     best_score: String,
@@ -621,9 +633,16 @@ impl Default for BoardState {
             spawn_timer: Timer::from_seconds(2.6, TimerMode::Repeating),
             sky_sun_timer: Timer::from_seconds(8.0, TimerMode::Repeating),
             wave_timer: Timer::from_seconds(20.0, TimerMode::Repeating),
+            grace_timer: Timer::from_seconds(opening_grace_seconds(0), TimerMode::Once),
             final_wave_started: false,
         }
     }
+}
+
+// Setup window before the first zombie walks in; veterans on later levels
+// get less breathing room.
+fn opening_grace_seconds(level_index: usize) -> f32 {
+    (9.0 - level_index as f32 * 0.6).clamp(4.0, 9.0)
 }
 
 impl BoardState {
@@ -641,6 +660,7 @@ impl BoardState {
             spawn_timer: Timer::from_seconds(level.base_spawn_interval, TimerMode::Repeating),
             sky_sun_timer: Timer::from_seconds(level.sky_sun_interval, TimerMode::Repeating),
             wave_timer: Timer::from_seconds(level.wave_duration, TimerMode::Repeating),
+            grace_timer: Timer::from_seconds(opening_grace_seconds(level_index), TimerMode::Once),
             final_wave_started: false,
         }
     }
@@ -667,6 +687,12 @@ struct MenuLevelText;
 #[derive(Component)]
 struct MenuRosterText;
 
+#[derive(Component, Clone, Copy)]
+struct MenuLevelRow(usize);
+
+#[derive(Component)]
+struct MenuStartButton;
+
 #[derive(Component)]
 struct MenuSettingsText;
 
@@ -675,6 +701,25 @@ struct PauseUi;
 
 #[derive(Component)]
 struct PauseText;
+
+#[derive(Component, Clone, Copy, Eq, PartialEq)]
+enum PauseButton {
+    Resume,
+    Restart,
+    Quit,
+}
+
+#[derive(Component)]
+struct EndRetryButton;
+
+#[derive(Component)]
+struct HintUi;
+
+#[derive(Component)]
+struct HintText;
+
+#[derive(Component)]
+struct WaveBarFill;
 
 #[derive(Component)]
 struct EndTitleText;
@@ -4614,6 +4659,7 @@ fn main() {
         })
         .insert_resource(settings)
         .insert_resource(PauseState::default())
+        .insert_resource(OnboardingState::default())
         .insert_resource(StoreScreenshotMode {
             scene: screenshot_scene,
         })
@@ -4647,7 +4693,8 @@ fn main() {
         .add_systems(OnEnter(GameState::Menu), spawn_menu)
         .add_systems(
             Update,
-            (menu_input, update_menu_text).run_if(in_state(GameState::Menu)),
+            (menu_input, menu_mouse, style_menu_rows, update_menu_text)
+                .run_if(in_state(GameState::Menu)),
         )
         .add_systems(OnExit(GameState::Menu), despawn_menu)
         .add_systems(
@@ -4661,8 +4708,11 @@ fn main() {
                 update_cursor,
                 tick_plant_cooldowns,
                 collect_sun,
+                pause_menu_buttons,
                 update_pause_ui,
                 update_hud,
+                update_wave_bar,
+                update_onboarding,
                 check_end_state,
             )
                 .chain()
@@ -4691,7 +4741,7 @@ fn main() {
         .add_systems(OnEnter(GameState::Victory), spawn_victory)
         .add_systems(
             Update,
-            (restart_input, update_end_text)
+            (restart_input, end_screen_mouse, update_end_text)
                 .run_if(in_state(GameState::GameOver).or(in_state(GameState::Victory))),
         )
         .add_systems(OnExit(GameState::GameOver), despawn_menu)
@@ -5470,36 +5520,42 @@ fn menu_level_line(
     )
 }
 
+fn menu_roster_line(
+    locale: &LocaleText,
+    language: Language,
+    levels: &LevelCatalog,
+    progress: &ProgressState,
+    index: usize,
+) -> String {
+    let level = &levels.levels[index];
+    let selected = if index == levels.selected { ">" } else { " " };
+    let lock = if progress.is_unlocked(index) {
+        ""
+    } else {
+        locale.locked_level.as_str()
+    };
+    let best = progress
+        .best_score(index)
+        .map(|score| score.to_string())
+        .unwrap_or_else(|| locale.no_score.clone());
+    format!(
+        "{selected} {:02}. {}  {}:{}  {}",
+        index + 1,
+        level.title(language),
+        locale.best_score,
+        best,
+        lock
+    )
+}
+
 fn menu_roster_text(
     locale: &LocaleText,
     language: Language,
     levels: &LevelCatalog,
     progress: &ProgressState,
 ) -> String {
-    levels
-        .levels
-        .iter()
-        .enumerate()
-        .map(|(index, level)| {
-            let selected = if index == levels.selected { ">" } else { " " };
-            let lock = if progress.is_unlocked(index) {
-                ""
-            } else {
-                locale.locked_level.as_str()
-            };
-            let best = progress
-                .best_score(index)
-                .map(|score| score.to_string())
-                .unwrap_or_else(|| locale.no_score.clone());
-            format!(
-                "{selected} {:02}. {}  {}:{}  {}",
-                index + 1,
-                level.title(language),
-                locale.best_score,
-                best,
-                lock
-            )
-        })
+    (0..levels.levels.len())
+        .map(|index| menu_roster_line(locale, language, levels, progress, index))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -5575,20 +5631,45 @@ fn spawn_menu(
                 TextColor(Color::srgb(0.86, 0.82, 0.58)),
                 MenuLevelText,
             ));
-            parent.spawn((
-                Text::new(menu_roster_text(
-                    locale,
-                    language.current,
-                    &levels,
-                    &progress,
-                )),
-                TextFont {
-                    font_size: 18.0,
+            parent
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(2.0),
                     ..default()
-                },
-                TextColor(Color::srgb(0.78, 0.88, 0.66)),
-                MenuRosterText,
-            ));
+                })
+                .with_children(|list| {
+                    for index in 0..levels.levels.len() {
+                        list.spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(14.0), Val::Px(3.0)),
+                                justify_content: JustifyContent::FlexStart,
+                                border_radius: BorderRadius::all(Val::Px(6.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::NONE),
+                            MenuLevelRow(index),
+                        ))
+                        .with_children(|row| {
+                            row.spawn((
+                                Text::new(menu_roster_line(
+                                    locale,
+                                    language.current,
+                                    &levels,
+                                    &progress,
+                                    index,
+                                )),
+                                TextFont {
+                                    font_size: 18.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.78, 0.88, 0.66)),
+                                MenuRosterText,
+                                MenuLevelRow(index),
+                            ));
+                        });
+                    }
+                });
             parent.spawn((
                 Text::new(menu_settings_line(&settings, language.current)),
                 TextFont {
@@ -5598,15 +5679,29 @@ fn spawn_menu(
                 TextColor(Color::srgb(0.72, 0.82, 0.90)),
                 MenuSettingsText,
             ));
-            parent.spawn((
-                Text::new(locale.menu_start.clone()),
-                TextFont {
-                    font_size: 26.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.96, 0.78, 0.30)),
-                MenuStartText,
-            ));
+            parent
+                .spawn((
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(22.0), Val::Px(8.0)),
+                        justify_content: JustifyContent::Center,
+                        border_radius: BorderRadius::all(Val::Px(10.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.16, 0.24, 0.10, 0.85)),
+                    MenuStartButton,
+                ))
+                .with_children(|button| {
+                    button.spawn((
+                        Text::new(locale.menu_start.clone()),
+                        TextFont {
+                            font_size: 26.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.96, 0.78, 0.30)),
+                        MenuStartText,
+                    ));
+                });
         });
 }
 
@@ -5639,7 +5734,7 @@ fn update_menu_text(
         Query<&mut Text, With<MenuTitleText>>,
         Query<&mut Text, With<MenuHelpText>>,
         Query<&mut Text, With<MenuLevelText>>,
-        Query<&mut Text, With<MenuRosterText>>,
+        Query<(&mut Text, &MenuLevelRow), With<MenuRosterText>>,
         Query<&mut Text, With<MenuSettingsText>>,
         Query<&mut Text, With<MenuStartText>>,
     )>,
@@ -5661,8 +5756,8 @@ fn update_menu_text(
     if let Ok(mut text) = text_queries.p2().single_mut() {
         **text = menu_level_line(locale, language.current, &levels, &progress);
     }
-    if let Ok(mut text) = text_queries.p3().single_mut() {
-        **text = menu_roster_text(locale, language.current, &levels, &progress);
+    for (mut text, row) in text_queries.p3().iter_mut() {
+        **text = menu_roster_line(locale, language.current, &levels, &progress, row.0);
     }
     if let Ok(mut text) = text_queries.p4().single_mut() {
         **text = menu_settings_line(&settings, language.current);
@@ -5716,6 +5811,67 @@ fn menu_input(
 fn restart_input(keyboard: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<GameState>>) {
     if keyboard.just_pressed(KeyCode::KeyR) || keyboard.just_pressed(KeyCode::Enter) {
         next.set(GameState::Playing);
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn menu_mouse(
+    progress: Res<ProgressState>,
+    mut levels: ResMut<LevelCatalog>,
+    mut next: ResMut<NextState<GameState>>,
+    mut rows: Query<(&Interaction, &MenuLevelRow), (Changed<Interaction>, With<Button>)>,
+    mut start: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<MenuStartButton>),
+    >,
+) {
+    for (interaction, row) in rows.iter_mut() {
+        match interaction {
+            Interaction::Hovered => levels.selected = row.0,
+            Interaction::Pressed => {
+                levels.selected = row.0;
+                if can_start_selected_level(&progress, row.0) {
+                    next.set(GameState::Playing);
+                }
+            }
+            Interaction::None => (),
+        }
+    }
+    for (interaction, mut background) in start.iter_mut() {
+        match interaction {
+            Interaction::Hovered => {
+                *background = BackgroundColor(Color::srgba(0.26, 0.38, 0.16, 0.92));
+            }
+            Interaction::Pressed => {
+                if can_start_selected_level(&progress, levels.selected) {
+                    next.set(GameState::Playing);
+                }
+            }
+            Interaction::None => {
+                *background = BackgroundColor(Color::srgba(0.16, 0.24, 0.10, 0.85));
+            }
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn style_menu_rows(
+    levels: Res<LevelCatalog>,
+    progress: Res<ProgressState>,
+    mut rows: Query<(&Interaction, &MenuLevelRow, &mut BackgroundColor), With<Button>>,
+) {
+    for (interaction, row, mut background) in rows.iter_mut() {
+        let locked = !progress.is_unlocked(row.0);
+        let color = if *interaction == Interaction::Hovered && !locked {
+            Color::srgba(0.34, 0.50, 0.22, 0.60)
+        } else if row.0 == levels.selected {
+            Color::srgba(0.22, 0.36, 0.14, 0.55)
+        } else {
+            Color::NONE
+        };
+        if background.0 != color {
+            *background = BackgroundColor(color);
+        }
     }
 }
 
@@ -5809,12 +5965,14 @@ fn start_game(
     mut commands: Commands,
     mut state: ResMut<BoardState>,
     levels: Res<LevelCatalog>,
+    mut onboarding: ResMut<OnboardingState>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
     let level = &levels.levels[levels.selected];
     *state = BoardState::for_level(levels.selected, level);
+    *onboarding = OnboardingState::default();
 
     let floor_mesh = meshes.add(Cuboid::new(13.2, 0.18, 8.0));
     let floor_mat = materials.add(StandardMaterial {
@@ -5919,6 +6077,34 @@ fn start_game(
                 TextColor(Color::srgb(0.92, 0.96, 0.78)),
                 HudText,
                 HudStatusText,
+            ));
+        });
+
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(78.0),
+                left: Val::Percent(27.0),
+                width: Val::Percent(46.0),
+                height: Val::Px(8.0),
+                padding: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.02, 0.06, 0.05, 0.85)),
+            HudUi,
+        ))
+        .with_children(|bar| {
+            bar.spawn((
+                Node {
+                    width: Val::Percent(0.0),
+                    height: Val::Percent(100.0),
+                    border_radius: BorderRadius::all(Val::Px(3.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.45, 0.78, 0.30)),
+                WaveBarFill,
             ));
         });
 
@@ -6092,6 +6278,7 @@ fn update_pause_ui(
     asset_server: Res<AssetServer>,
     query: Query<Entity, (With<PauseUi>, Without<PauseText>)>,
     mut text_query: Query<&mut Text, With<PauseText>>,
+    mut button_labels: Query<(&mut Text, &PauseButton), Without<PauseText>>,
 ) {
     let exists = !query.is_empty();
     if pause.paused && !exists {
@@ -6100,27 +6287,70 @@ fn update_pause_ui(
             .spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    right: Val::Px(24.0),
-                    bottom: Val::Px(24.0),
-                    width: Val::Px(430.0),
-                    padding: UiRect::all(Val::Px(18.0)),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(10.0),
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
                     ..default()
                 },
-                ui_panel_image(&asset_server, UI_END_PANEL),
+                BackgroundColor(Color::srgba(0.01, 0.04, 0.03, 0.55)),
+                GlobalZIndex(10),
                 PauseUi,
             ))
-            .with_children(|parent| {
-                parent.spawn((
-                    Text::new(pause_text(locale, &settings)),
-                    TextFont {
-                        font_size: 20.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.92, 0.96, 0.78)),
-                    PauseText,
-                ));
+            .with_children(|overlay| {
+                overlay
+                    .spawn((
+                        Node {
+                            width: Val::Px(430.0),
+                            padding: UiRect::all(Val::Px(22.0)),
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Center,
+                            row_gap: Val::Px(12.0),
+                            ..default()
+                        },
+                        ui_panel_image(&asset_server, UI_END_PANEL),
+                    ))
+                    .with_children(|parent| {
+                        parent.spawn((
+                            Text::new(pause_text(locale, &settings)),
+                            TextFont {
+                                font_size: 20.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.92, 0.96, 0.78)),
+                            PauseText,
+                        ));
+                        for (action, label) in [
+                            (PauseButton::Resume, locale.pause_resume.clone()),
+                            (PauseButton::Restart, locale.pause_restart.clone()),
+                            (PauseButton::Quit, locale.pause_quit.clone()),
+                        ] {
+                            parent
+                                .spawn((
+                                    Button,
+                                    Node {
+                                        width: Val::Px(260.0),
+                                        padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
+                                        justify_content: JustifyContent::Center,
+                                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgba(0.16, 0.24, 0.10, 0.90)),
+                                    action,
+                                ))
+                                .with_children(|button| {
+                                    button.spawn((
+                                        Text::new(label),
+                                        TextFont {
+                                            font_size: 22.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::srgb(0.90, 0.94, 0.72)),
+                                        action,
+                                    ));
+                                });
+                        }
+                    });
             });
     } else if !pause.paused && exists {
         for entity in &query {
@@ -6130,6 +6360,46 @@ fn update_pause_ui(
         let locale = localization.text(language.current);
         for mut text in &mut text_query {
             **text = pause_text(locale, &settings);
+        }
+        for (mut text, action) in &mut button_labels {
+            **text = match action {
+                PauseButton::Resume => locale.pause_resume.clone(),
+                PauseButton::Restart => locale.pause_restart.clone(),
+                PauseButton::Quit => locale.pause_quit.clone(),
+            };
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn pause_menu_buttons(
+    mut commands: Commands,
+    mut pause: ResMut<PauseState>,
+    mut next: ResMut<NextState<GameState>>,
+    mut buttons: Query<
+        (&Interaction, &PauseButton, &mut BackgroundColor),
+        (Changed<Interaction>, With<Button>),
+    >,
+) {
+    for (interaction, action, mut background) in buttons.iter_mut() {
+        match interaction {
+            Interaction::Hovered => {
+                *background = BackgroundColor(Color::srgba(0.28, 0.40, 0.18, 0.95));
+            }
+            Interaction::None => {
+                *background = BackgroundColor(Color::srgba(0.16, 0.24, 0.10, 0.90));
+            }
+            Interaction::Pressed => {
+                pause.paused = false;
+                match action {
+                    PauseButton::Resume => (),
+                    PauseButton::Restart => {
+                        commands.run_system_cached(despawn_game);
+                        commands.run_system_cached(start_game);
+                    }
+                    PauseButton::Quit => next.set(GameState::Menu),
+                }
+            }
         }
     }
 }
@@ -6141,6 +6411,121 @@ fn pause_text(locale: &LocaleText, settings: &GameSettings) -> String {
         if settings.fullscreen { "on" } else { "off" },
         settings.master_volume * 100.0
     )
+}
+
+fn wave_progress(wave: u32, timer_fraction: f32, final_wave: u32, final_started: bool) -> f32 {
+    if final_started {
+        return 1.0;
+    }
+    ((wave.saturating_sub(1) as f32 + timer_fraction) / final_wave.max(1) as f32).clamp(0.0, 1.0)
+}
+
+fn update_wave_bar(
+    state: Res<BoardState>,
+    levels: Res<LevelCatalog>,
+    mut fills: Query<(&mut Node, &mut BackgroundColor), With<WaveBarFill>>,
+) {
+    let level = &levels.levels[state.level_index];
+    let progress = wave_progress(
+        state.wave,
+        state.wave_timer.fraction(),
+        level.final_wave,
+        state.final_wave_started,
+    );
+    for (mut node, mut color) in fills.iter_mut() {
+        node.width = Val::Percent(progress * 100.0);
+        // green while calm, sliding toward red as the final wave nears
+        *color = BackgroundColor(Color::hsl(110.0 - progress * 95.0, 0.65, 0.45));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_onboarding(
+    mut commands: Commands,
+    time: Res<Time>,
+    state: Res<BoardState>,
+    language: Res<LanguageSettings>,
+    localization: Res<LocalizationCatalog>,
+    mut onboarding: ResMut<OnboardingState>,
+    plants: Query<&Plant>,
+    hint_root: Query<Entity, With<HintUi>>,
+    mut hint_text: Query<&mut Text, With<HintText>>,
+) {
+    if state.level_index != 0 || onboarding.done {
+        for entity in &hint_root {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+    match onboarding.step {
+        0 => {
+            if plants.iter().any(|plant| plant.kind == PlantKind::Sunflower) {
+                onboarding.step = 1;
+            }
+        }
+        1 => {
+            if state.sun >= 100 {
+                onboarding.step = 2;
+            }
+        }
+        2 => {
+            if plants.iter().any(|plant| plant.kind != PlantKind::Sunflower) {
+                onboarding.step = 3;
+                onboarding.timer = Timer::from_seconds(8.0, TimerMode::Once);
+            }
+        }
+        _ => {
+            onboarding.timer.tick(time.delta());
+            if onboarding.timer.is_finished() {
+                onboarding.done = true;
+            }
+        }
+    }
+    let locale = localization.text(language.current);
+    let hint = locale
+        .hints
+        .get(onboarding.step)
+        .cloned()
+        .unwrap_or_default();
+    if hint_root.is_empty() {
+        commands
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: Val::Px(124.0),
+                    width: Val::Percent(100.0),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                HintUi,
+                HudUi,
+            ))
+            .with_children(|root| {
+                root.spawn((
+                    Node {
+                        padding: UiRect::axes(Val::Px(18.0), Val::Px(8.0)),
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.03, 0.09, 0.06, 0.85)),
+                ))
+                .with_children(|panel| {
+                    panel.spawn((
+                        Text::new(hint.clone()),
+                        TextFont {
+                            font_size: 18.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.98, 0.88, 0.52)),
+                        HintText,
+                    ));
+                });
+            });
+    } else if let Ok(mut text) = hint_text.single_mut()
+        && text.0 != hint
+    {
+        text.0 = hint;
+    }
 }
 
 fn update_cursor(state: Res<BoardState>, mut query: Query<&mut Transform, With<CursorMarker>>) {
@@ -6783,6 +7168,10 @@ fn spawn_zombies(
 ) {
     let level = &levels.levels[state.level_index];
     let locale = localization.text(language.current);
+    if !state.grace_timer.is_finished() {
+        state.grace_timer.tick(time.delta());
+        return;
+    }
     state.wave_timer.tick(time.delta());
     if state.wave_timer.just_finished() && state.wave < level.final_wave {
         state.wave += 1;
@@ -7452,16 +7841,51 @@ fn spawn_end_screen(
                 TextColor(Color::srgb(0.92, 0.96, 0.74)),
                 EndTitleText,
             ));
-            parent.spawn((
-                Text::new(subtitle.to_string()),
-                TextFont {
-                    font_size: 24.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.82, 0.88, 0.72)),
-                EndSubtitleText,
-            ));
+            parent
+                .spawn((
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(20.0), Val::Px(8.0)),
+                        justify_content: JustifyContent::Center,
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.16, 0.24, 0.10, 0.90)),
+                    EndRetryButton,
+                ))
+                .with_children(|button| {
+                    button.spawn((
+                        Text::new(subtitle.to_string()),
+                        TextFont {
+                            font_size: 24.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.82, 0.88, 0.72)),
+                        EndSubtitleText,
+                    ));
+                });
         });
+}
+
+#[allow(clippy::type_complexity)]
+fn end_screen_mouse(
+    mut next: ResMut<NextState<GameState>>,
+    mut buttons: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<EndRetryButton>),
+    >,
+) {
+    for (interaction, mut background) in buttons.iter_mut() {
+        match interaction {
+            Interaction::Pressed => next.set(GameState::Playing),
+            Interaction::Hovered => {
+                *background = BackgroundColor(Color::srgba(0.28, 0.40, 0.18, 0.95));
+            }
+            Interaction::None => {
+                *background = BackgroundColor(Color::srgba(0.16, 0.24, 0.10, 0.90));
+            }
+        }
+    }
 }
 
 fn despawn_menu(mut commands: Commands, query: Query<Entity, With<MenuUi>>) {
@@ -7872,7 +8296,7 @@ mod tests {
         assert!(report.contains("sun pickup budget: 47"));
         assert!(report.contains("visual effect budget: 45"));
         assert!(report.contains("estimated dynamic entities: 275/320"));
-        assert!(report.contains("embedded asset bytes: 16939598/25000000"));
+        assert!(report.contains("embedded asset bytes: 16940483/25000000"));
         assert!(report.contains("checked viewport floor: compact-540p 960x540"));
         assert!(report.contains("manual performance QA still required"));
     }
