@@ -45,6 +45,20 @@ jobs:
             --out-dir web-dist --out-name bevy_open_siege_webgpu \
             target/wasm32-unknown-unknown/web-release/bevy_open_siege.wasm
 
+      - name: Shrink wasm with wasm-opt
+        run: |
+          BINARYEN=version_123
+          curl -sSL "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN}/binaryen-${BINARYEN}-x86_64-linux.tar.gz" | tar xz
+          for wasm in web-dist/*_bg.wasm; do
+            before=$(stat -c%s "$wasm")
+            "binaryen-${BINARYEN}/bin/wasm-opt" -Oz \
+              --enable-bulk-memory --enable-nontrapping-float-to-int \
+              "$wasm" -o "$wasm.opt"
+            mv "$wasm.opt" "$wasm"
+            after=$(stat -c%s "$wasm")
+            echo "$wasm: $before -> $after bytes"
+          done
+
       - name: Assemble web bundle
         run: |
           cp web/index.html web/favicon.png web-dist/
