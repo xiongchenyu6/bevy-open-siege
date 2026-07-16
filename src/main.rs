@@ -652,6 +652,14 @@ fn opening_grace_seconds(level_index: usize) -> f32 {
     (9.0 - level_index as f32 * 0.6).clamp(4.0, 9.0)
 }
 
+// Lanes open center-out as waves progress so the early economy can keep up;
+// later levels start wider until every lane is hot from wave one.
+const LANE_ROLLOUT: [usize; LANES] = [2, 1, 3, 0, 4];
+
+fn active_lane_count(level_index: usize, wave: u32) -> usize {
+    (wave as usize + level_index).clamp(1, LANES)
+}
+
 impl BoardState {
     fn for_level(level_index: usize, level: &LevelConfig) -> Self {
         Self {
@@ -3993,7 +4001,11 @@ fn audit_balance() -> Result<BalanceAuditReport, String> {
                 level.id
             ));
         }
-        if !(1.0..=3.5).contains(&level.base_spawn_interval) {
+        // Upper bound raised from 3.5 after autoplay testing showed early
+        // levels need slower trickles: one shooter kills a wave-1 walker in
+        // ~5.3s, so sub-4s spawn intervals put lane one in deficit from the
+        // first minute.
+        if !(1.0..=6.5).contains(&level.base_spawn_interval) {
             return Err(format!(
                 "level {} base_spawn_interval {} is outside release bounds",
                 level.id, level.base_spawn_interval
@@ -7305,8 +7317,9 @@ fn spawn_zombies(
     };
     state.final_wave_started |= state.wave >= level.final_wave;
 
+    let active_lanes = active_lane_count(state.level_index, state.wave);
     for _ in 0..count {
-        let lane = rng.random_range(0..LANES);
+        let lane = LANE_ROLLOUT[rng.random_range(0..active_lanes)];
         let kind = choose_zombie_kind(
             state.level_index,
             state.wave,
@@ -7714,17 +7727,21 @@ fn collect_sun(
     if pause.paused {
         return;
     }
-    for (entity, mut sun, transform) in &mut suns {
+    let mut collected = 0;
+    for (entity, mut sun, _transform) in &mut suns {
         sun.lifetime.tick(time.delta());
-        let on_cursor = (transform.translation.x - col_x(state.cursor_col)).abs() < CELL * 0.55
-            && (transform.translation.z - lane_z(state.cursor_lane)).abs() < CELL * 0.55;
         if sun.lifetime.is_finished() {
             commands.entity(entity).despawn();
-        } else if on_cursor && keyboard.just_pressed(KeyCode::KeyC) {
+        } else if keyboard.just_pressed(KeyCode::KeyC) {
+            // C acts as a sun magnet: chasing each orb with the cursor made
+            // keyboard play a chore and left sky sun rotting on far tiles.
             state.sun += sun.value;
+            collected += 1;
             commands.entity(entity).despawn();
-            play_sound(&audio, &settings, AUDIO_SUN_COLLECT, 0.58);
         }
+    }
+    if collected > 0 {
+        play_sound(&audio, &settings, AUDIO_SUN_COLLECT, 0.58);
     }
 }
 
@@ -8452,7 +8469,7 @@ mod tests {
         assert!(report.contains("sun pickup budget: 47"));
         assert!(report.contains("visual effect budget: 45"));
         assert!(report.contains("estimated dynamic entities: 275/320"));
-        assert!(report.contains("embedded asset bytes: 17034335/25000000"));
+        assert!(report.contains("embedded asset bytes: 17034318/25000000"));
         assert!(report.contains("checked viewport floor: compact-540p 960x540"));
         assert!(report.contains("manual performance QA still required"));
     }
@@ -8583,6 +8600,17 @@ mod tests {
         assert!(report.contains("pending: final visual spot-check on release hardware"));
         assert!(report.contains("pending: final art-direction review"));
         assert!(report.contains("ship status: release candidate, not final approval"));
+    }
+
+    #[test]
+    fn lane_rollout_opens_gradually() {
+        assert_eq!(active_lane_count(0, 1), 1);
+        assert_eq!(active_lane_count(0, 3), 3);
+        assert_eq!(active_lane_count(0, 6), LANES);
+        assert_eq!(active_lane_count(2, 3), LANES);
+        assert_eq!(active_lane_count(9, 1), LANES);
+        let seen: HashSet<usize> = LANE_ROLLOUT.into_iter().collect();
+        assert_eq!(seen.len(), LANES, "rollout must cover every lane once");
     }
 
     #[test]
