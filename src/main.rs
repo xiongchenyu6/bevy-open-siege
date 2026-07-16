@@ -729,6 +729,22 @@ struct HintText;
 struct WaveBarFill;
 
 #[derive(Component)]
+struct HitReact {
+    timer: Timer,
+    base_scale: Vec3,
+}
+
+#[derive(Resource, Default)]
+struct ScreenShake {
+    trauma: f32,
+}
+
+#[derive(Component)]
+struct CameraRig {
+    base: Vec3,
+}
+
+#[derive(Component)]
 struct EndTitleText;
 
 #[derive(Component)]
@@ -4676,6 +4692,7 @@ fn main() {
         .insert_resource(settings)
         .insert_resource(PauseState::default())
         .insert_resource(OnboardingState::default())
+        .insert_resource(ScreenShake::default())
         .insert_resource(StoreScreenshotMode {
             scene: screenshot_scene,
         })
@@ -4750,6 +4767,8 @@ fn main() {
                 tag_limbs,
                 animate_limbs,
                 grow_plants,
+                hit_react,
+                shake_camera,
                 cleanup_dead,
             )
                 .chain()
@@ -5141,6 +5160,9 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 9.5, 9.7).looking_at(Vec3::new(0.0, 0.0, 0.4), Vec3::Y),
+        CameraRig {
+            base: Vec3::new(0.0, 9.5, 9.7),
+        },
         AmbientLight {
             color: Color::srgb(0.72, 0.86, 0.80),
             brightness: 420.0,
@@ -6918,6 +6940,7 @@ fn plants_act(
     asset_server: Res<AssetServer>,
     settings: Res<GameSettings>,
     audio: Res<AsyncAudio>,
+    mut shake: ResMut<ScreenShake>,
 ) {
     for (mut plant, transform) in &mut plants {
         match plant.kind {
@@ -7080,6 +7103,7 @@ fn plants_act(
                         2.25,
                         0.42,
                     );
+                    shake.trauma = (shake.trauma + 0.65).min(1.0);
                     for (mut zombie, zombie_transform) in &mut zombies {
                         let lane_distance = zombie.lane.abs_diff(plant.lane);
                         if lane_distance <= 1
@@ -7176,6 +7200,16 @@ fn spawn_projectile(
     origin: Vec3,
     spec: ProjectileSpec,
 ) {
+    spawn_visual_effect(
+        commands,
+        meshes,
+        materials,
+        asset_server,
+        EFFECT_FIRE,
+        Vec3::new(origin.x + 0.30, 0.55, origin.z),
+        0.22,
+        0.09,
+    );
     commands.spawn((
         Mesh3d(meshes.add(billboard_mesh(spec.visual_size, spec.visual_size))),
         MeshMaterial3d(materials.add(StandardMaterial {
@@ -7407,17 +7441,18 @@ fn move_projectiles(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     mut projectiles: Query<(Entity, &mut Projectile, &mut Transform), Without<Zombie>>,
-    mut zombies: Query<(Entity, &mut Zombie, &GlobalTransform), Without<Projectile>>,
+    mut zombies: Query<(Entity, &mut Zombie, &GlobalTransform, Has<HitReact>), Without<Projectile>>,
 ) {
     for (projectile_entity, mut projectile, mut projectile_transform) in &mut projectiles {
         projectile_transform.translation.x += projectile.speed * time.delta_secs();
+        projectile_transform.rotate_local_z(-6.5 * time.delta_secs());
         if projectile_transform.translation.x > 8.0 {
             commands.entity(projectile_entity).despawn();
             continue;
         }
 
         let mut hit = false;
-        for (_zombie_entity, mut zombie, zombie_transform) in &mut zombies {
+        for (zombie_entity, mut zombie, zombie_transform, reacting) in &mut zombies {
             if zombie.lane == projectile.lane
                 && (zombie_transform.translation().x - projectile_transform.translation.x).abs()
                     < 0.28
@@ -7426,13 +7461,19 @@ fn move_projectiles(
                 if projectile.slow_secs > 0.0 {
                     zombie.slow_timer = Timer::from_seconds(projectile.slow_secs, TimerMode::Once);
                 }
+                if !reacting {
+                    commands.entity(zombie_entity).insert(HitReact {
+                        timer: Timer::from_seconds(0.16, TimerMode::Once),
+                        base_scale: zombie_transform.scale(),
+                    });
+                }
                 hit = true;
                 break;
             }
         }
 
         if projectile.splash_radius > 0.0 && hit {
-            for (_zombie_entity, mut zombie, zombie_transform) in &mut zombies {
+            for (_zombie_entity, mut zombie, zombie_transform, _) in &mut zombies {
                 if zombie.lane == projectile.lane
                     && (zombie_transform.translation().x - projectile_transform.translation.x).abs()
                         < projectile.splash_radius
@@ -7460,6 +7501,44 @@ fn move_projectiles(
                 projectile.pierce -= 1;
             }
         }
+    }
+}
+
+fn hit_react(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut zombies: Query<(Entity, &mut HitReact, &mut Transform), With<Zombie>>,
+) {
+    for (entity, mut react, mut transform) in &mut zombies {
+        if react.timer.elapsed_secs() == 0.0 {
+            transform.translation.x += 0.05;
+        }
+        react.timer.tick(time.delta());
+        if react.timer.is_finished() {
+            transform.scale = react.base_scale;
+            commands.entity(entity).remove::<HitReact>();
+            continue;
+        }
+        let squash = 1.0 - 0.16 * (react.timer.fraction() * std::f32::consts::PI).sin();
+        transform.scale = react.base_scale * Vec3::new(1.0 / squash, squash, 1.0 / squash);
+    }
+}
+
+fn shake_camera(
+    time: Res<Time>,
+    mut shake: ResMut<ScreenShake>,
+    mut cameras: Query<(&mut Transform, &CameraRig)>,
+) {
+    shake.trauma = (shake.trauma - time.delta_secs() * 1.6).max(0.0);
+    let amount = shake.trauma * shake.trauma * 0.14;
+    let t = time.elapsed_secs();
+    for (mut transform, rig) in &mut cameras {
+        transform.translation = rig.base
+            + Vec3::new(
+                (t * 37.0).sin(),
+                (t * 47.0).cos() * 0.6,
+                (t * 29.0).sin(),
+            ) * amount;
     }
 }
 
@@ -7659,6 +7738,7 @@ fn cleanup_dead(
     zombies: Query<(Entity, &Zombie, &Transform)>,
     settings: Res<GameSettings>,
     audio: Res<AsyncAudio>,
+    mut shake: ResMut<ScreenShake>,
 ) {
     for (entity, plant, transform) in &plants {
         if plant.health <= 0.0 {
@@ -7678,6 +7758,9 @@ fn cleanup_dead(
     for (entity, zombie, transform) in &zombies {
         if zombie.health <= 0.0 {
             state.score += zombie.kind.score();
+            if matches!(zombie.kind, ZombieKind::Gargantuar | ZombieKind::Brute) {
+                shake.trauma = (shake.trauma + 0.4).min(1.0);
+            }
             spawn_visual_effect(
                 &mut commands,
                 &mut meshes,
