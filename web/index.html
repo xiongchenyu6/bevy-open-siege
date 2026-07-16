@@ -89,6 +89,9 @@
       function fetchWithProgress(url) {
         // Count bytes as they stream so the bar reflects the real download.
         return fetch(url).then((resp) => {
+          if (!resp.ok) {
+            throw new Error(`${url}: HTTP ${resp.status}`);
+          }
           const total = Number(resp.headers.get("content-length")) || 0;
           let loaded = 0;
           const stream = new ReadableStream({
