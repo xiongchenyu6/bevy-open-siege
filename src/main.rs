@@ -6329,6 +6329,7 @@ fn handle_board_input(
     mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
+    touches: Res<Touches>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     pause: Res<PauseState>,
@@ -6368,10 +6369,19 @@ fn handle_board_input(
         }
     }
 
+    // A tap acts like a left click at the touch position (phones/tablets
+    // have no separate cursor), while mouse clicks use the hover position.
     let mut clicked_board = false;
-    if let Ok(window) = windows.single()
-        && let Some((col, lane)) = cursor_grid_cell(window, &cameras)
-        && (mouse.just_pressed(MouseButton::Left) || mouse.just_pressed(MouseButton::Right))
+    let tap_position = touches.iter_just_pressed().next().map(|touch| touch.position());
+    let pointer_position = if mouse.just_pressed(MouseButton::Left)
+        || mouse.just_pressed(MouseButton::Right)
+    {
+        windows.single().ok().and_then(Window::cursor_position)
+    } else {
+        tap_position
+    };
+    if let Some(position) = pointer_position
+        && let Some((col, lane)) = position_grid_cell(position, &cameras)
     {
         state.cursor_col = col;
         state.cursor_lane = lane;
@@ -6394,7 +6404,7 @@ fn handle_board_input(
     // Mouse planting requires the click to land on a board tile, so UI
     // clicks (seed cards, pause buttons) never place a plant as a side effect.
     let wants_plant = keyboard.just_pressed(KeyCode::Space)
-        || (clicked_board && mouse.just_pressed(MouseButton::Left));
+        || (clicked_board && (mouse.just_pressed(MouseButton::Left) || tap_position.is_some()));
     if !wants_plant {
         return;
     }
@@ -6428,13 +6438,12 @@ fn handle_board_input(
     play_sound(&audio, &settings, AUDIO_PLANT_PLACE, 0.72);
 }
 
-fn cursor_grid_cell(
-    window: &Window,
+fn position_grid_cell(
+    position: Vec2,
     cameras: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
 ) -> Option<(usize, usize)> {
-    let cursor = window.cursor_position()?;
     let (camera, camera_transform) = cameras.single().ok()?;
-    let ray = camera.viewport_to_world(camera_transform, cursor).ok()?;
+    let ray = camera.viewport_to_world(camera_transform, position).ok()?;
     let point = ray.plane_intersection_point(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y))?;
     grid_cell_from_world(point)
 }
