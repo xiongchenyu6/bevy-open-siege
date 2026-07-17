@@ -49,7 +49,7 @@ bevy = { version = "0.18.1", default-features = false, features = [
     "wav",
 ] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
-web-sys = { version = "0.3", features = ["Window", "Storage"] }
+web-sys = { version = "0.3", features = ["Window", "Storage", "Location"] }
 
 [profile.web-release]
 inherits = "release"

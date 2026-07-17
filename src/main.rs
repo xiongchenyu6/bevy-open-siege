@@ -734,6 +734,9 @@ enum PauseButton {
 struct EndRetryButton;
 
 #[derive(Component)]
+struct EndMenuButton;
+
+#[derive(Component)]
 struct HintUi;
 
 #[derive(Component)]
@@ -4881,6 +4884,30 @@ fn ensure_primary_window_size(
     }
 }
 
+fn store_screenshot_scene_name(value: &str) -> Option<StoreScreenshotScene> {
+    match value {
+        "title-menu" => Some(StoreScreenshotScene::TitleMenu),
+        "early-defense" => Some(StoreScreenshotScene::EarlyDefense),
+        "special-enemies" => Some(StoreScreenshotScene::SpecialEnemies),
+        "late-siege" => Some(StoreScreenshotScene::LateSiege),
+        "victory-summary" => Some(StoreScreenshotScene::VictorySummary),
+        _ => None,
+    }
+}
+
+// The web build has no CLI, so staged screenshot scenes come from the URL
+// query instead: index.html?scene=early-defense
+#[cfg(target_arch = "wasm32")]
+fn store_screenshot_scene_arg() -> Option<StoreScreenshotScene> {
+    let search = web_sys::window()?.location().search().ok()?;
+    let value = search
+        .trim_start_matches('?')
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("scene="))?;
+    store_screenshot_scene_name(value)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn store_screenshot_scene_arg() -> Option<StoreScreenshotScene> {
     let mut args = std::env::args().skip(1).peekable();
     while let Some(arg) = args.next() {
@@ -4892,13 +4919,9 @@ fn store_screenshot_scene_arg() -> Option<StoreScreenshotScene> {
             None
         };
         if let Some(value) = value {
-            return match value.as_str() {
-                "title-menu" => Some(StoreScreenshotScene::TitleMenu),
-                "early-defense" => Some(StoreScreenshotScene::EarlyDefense),
-                "special-enemies" => Some(StoreScreenshotScene::SpecialEnemies),
-                "late-siege" => Some(StoreScreenshotScene::LateSiege),
-                "victory-summary" => Some(StoreScreenshotScene::VictorySummary),
-                _ => {
+            return match store_screenshot_scene_name(&value) {
+                Some(scene) => Some(scene),
+                None => {
                     eprintln!("unknown store screenshot scene: {value}");
                     std::process::exit(2);
                 }
@@ -5973,6 +5996,9 @@ fn menu_input(
 fn restart_input(keyboard: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<GameState>>) {
     if keyboard.just_pressed(KeyCode::KeyR) || keyboard.just_pressed(KeyCode::Enter) {
         next.set(GameState::Playing);
+    }
+    if keyboard.just_pressed(KeyCode::Escape) || keyboard.just_pressed(KeyCode::KeyM) {
+        next.set(GameState::Menu);
     }
 }
 
@@ -8143,6 +8169,7 @@ fn spawn_game_over(
         &asset_server,
         &locale.game_over,
         &end_subtitle(locale, GameState::GameOver, &state),
+        &locale.pause_quit,
     );
 }
 
@@ -8175,6 +8202,7 @@ fn spawn_victory(
         &asset_server,
         &locale.victory,
         &end_subtitle(locale, GameState::Victory, &state),
+        &locale.pause_quit,
     );
 }
 
@@ -8220,6 +8248,7 @@ fn spawn_end_screen(
     asset_server: &AssetServer,
     title: &str,
     subtitle: &str,
+    menu_label: &str,
 ) {
     commands
         .spawn((
@@ -8268,6 +8297,28 @@ fn spawn_end_screen(
                         EndSubtitleText,
                     ));
                 });
+            parent
+                .spawn((
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(18.0), Val::Px(6.0)),
+                        justify_content: JustifyContent::Center,
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.12, 0.18, 0.10, 0.90)),
+                    EndMenuButton,
+                ))
+                .with_children(|button| {
+                    button.spawn((
+                        Text::new(menu_label.to_string()),
+                        TextFont {
+                            font_size: 20.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.74, 0.82, 0.68)),
+                    ));
+                });
         });
 }
 
@@ -8275,13 +8326,25 @@ fn spawn_end_screen(
 fn end_screen_mouse(
     mut next: ResMut<NextState<GameState>>,
     mut buttons: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<EndRetryButton>),
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            Has<EndRetryButton>,
+            Has<EndMenuButton>,
+        ),
+        (Changed<Interaction>, With<Button>),
     >,
 ) {
-    for (interaction, mut background) in buttons.iter_mut() {
+    for (interaction, mut background, retry, menu) in buttons.iter_mut() {
+        if !retry && !menu {
+            continue;
+        }
         match interaction {
-            Interaction::Pressed => next.set(GameState::Playing),
+            Interaction::Pressed => next.set(if retry {
+                GameState::Playing
+            } else {
+                GameState::Menu
+            }),
             Interaction::Hovered => {
                 *background = BackgroundColor(Color::srgba(0.28, 0.40, 0.18, 0.95));
             }
