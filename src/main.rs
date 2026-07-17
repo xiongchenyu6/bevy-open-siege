@@ -350,6 +350,7 @@ struct BoardState {
     selected: PlantKind,
     wave: u32,
     score: u32,
+    kills: u32,
     lost_house_hp: u32,
     plant_cooldowns: [f32; PlantKind::COUNT],
     spawn_timer: Timer,
@@ -479,6 +480,9 @@ struct LocaleText {
     pause_resume: String,
     pause_restart: String,
     pause_quit: String,
+    kills: String,
+    wave_incoming: String,
+    final_wave_warning: String,
     hints: Vec<String>,
     locked_level: String,
     level: String,
@@ -635,6 +639,7 @@ impl Default for BoardState {
             selected: PlantKind::Peashooter,
             wave: 1,
             score: 0,
+            kills: 0,
             lost_house_hp: 0,
             plant_cooldowns: [0.0; PlantKind::COUNT],
             spawn_timer: Timer::from_seconds(2.6, TimerMode::Repeating),
@@ -670,6 +675,7 @@ impl BoardState {
             selected: PlantKind::Peashooter,
             wave: 1,
             score: 0,
+            kills: 0,
             lost_house_hp: 0,
             plant_cooldowns: [0.0; PlantKind::COUNT],
             spawn_timer: Timer::from_seconds(level.base_spawn_interval, TimerMode::Repeating),
@@ -735,6 +741,17 @@ struct HintText;
 
 #[derive(Component)]
 struct WaveBarFill;
+
+#[derive(Component)]
+struct SeedButton(PlantKind);
+
+#[derive(Component)]
+struct WaveBanner {
+    timer: Timer,
+}
+
+#[derive(Component)]
+struct WaveBannerText;
 
 #[derive(Component)]
 struct HitReact {
@@ -3246,6 +3263,7 @@ fn layout_audit_report() -> Result<String, String> {
             BoardState::for_level(levels.levels.len() - 1, levels.levels.last().unwrap());
         state.sun = 9_999;
         state.score = 99_999;
+        state.kills = 999;
         state.wave = levels.levels.last().unwrap().final_wave;
         for cooldown in &mut state.plant_cooldowns {
             *cooldown = 18.0;
@@ -3284,14 +3302,14 @@ fn layout_audit_report() -> Result<String, String> {
         audit_text_block(
             &mut lines,
             &format!("{lang} game over subtitle"),
-            &end_subtitle(locale, GameState::GameOver, 99_999),
+            &end_subtitle(locale, GameState::GameOver, &state),
             96,
             1,
         )?;
         audit_text_block(
             &mut lines,
             &format!("{lang} victory subtitle"),
-            &end_subtitle(locale, GameState::Victory, 99_999),
+            &end_subtitle(locale, GameState::Victory, &state),
             96,
             1,
         )?;
@@ -4561,7 +4579,45 @@ fn parse_save_file(path: &Path) -> Option<SaveData> {
     }
 }
 
+// Browsers have no filesystem, so web saves live in localStorage under this
+// key, using the same RON payload as the desktop save file.
+#[cfg(target_arch = "wasm32")]
+const WEB_SAVE_KEY: &str = "bevy_open_siege_save";
+
+#[cfg(target_arch = "wasm32")]
+fn web_local_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok()?
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_web_save() -> Option<SaveData> {
+    let contents = web_local_storage()?.get_item(WEB_SAVE_KEY).ok()??;
+    match ron::from_str(&contents) {
+        Ok(save) => Some(save),
+        Err(error) => {
+            warn!("failed to parse web save: {error}");
+            None
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn store_web_save(contents: &str) {
+    let Some(storage) = web_local_storage() else {
+        warn!("localStorage unavailable; progress will not persist");
+        return;
+    };
+    if storage.set_item(WEB_SAVE_KEY, contents).is_err() {
+        warn!("failed to write web save to localStorage");
+    }
+}
+
 fn load_save() -> SaveData {
+    #[cfg(target_arch = "wasm32")]
+    if let Some(save) = load_web_save() {
+        return save;
+    }
+
     let path = save_path();
     if let Some(save) = parse_save_file(&path) {
         return save;
@@ -4590,20 +4646,27 @@ fn save_progress(language: Language, progress: &ProgressState, settings: &GameSe
     };
     match ron::ser::to_string_pretty(&save, ron::ser::PrettyConfig::default()) {
         Ok(contents) => {
-            let path = save_path();
-            if let Some(parent) = path
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty())
-                && let Err(error) = fs::create_dir_all(parent)
+            #[cfg(target_arch = "wasm32")]
             {
-                warn!(
-                    "failed to create save directory {}: {error}",
-                    parent.display()
-                );
-                return;
+                store_web_save(&contents);
             }
-            if let Err(error) = fs::write(&path, contents) {
-                warn!("failed to write save file {}: {error}", path.display());
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let path = save_path();
+                if let Some(parent) = path
+                    .parent()
+                    .filter(|parent| !parent.as_os_str().is_empty())
+                    && let Err(error) = fs::create_dir_all(parent)
+                {
+                    warn!(
+                        "failed to create save directory {}: {error}",
+                        parent.display()
+                    );
+                    return;
+                }
+                if let Err(error) = fs::write(&path, contents) {
+                    warn!("failed to write save file {}: {error}", path.display());
+                }
             }
         }
         Err(error) => warn!("failed to serialize save data: {error}"),
@@ -4759,6 +4822,8 @@ fn main() {
                 pause_menu_buttons,
                 update_pause_ui,
                 update_hud,
+                seed_card_clicks,
+                update_seed_cards,
                 update_wave_bar,
                 update_onboarding,
                 check_end_state,
@@ -4781,6 +4846,7 @@ fn main() {
                 grow_plants,
                 hit_react,
                 shake_camera,
+                announce_waves,
                 cleanup_dead,
             )
                 .chain()
@@ -6221,16 +6287,40 @@ fn start_game(
             HudUi,
         ))
         .with_children(|parent| {
-            parent.spawn((
-                Text::new(""),
-                TextFont {
-                    font_size: 16.0,
+            parent
+                .spawn(Node {
+                    column_gap: Val::Px(6.0),
+                    align_items: AlignItems::Stretch,
                     ..default()
-                },
-                TextColor(Color::srgb(0.82, 0.92, 0.70)),
-                HudText,
-                HudSeedBankText,
-            ));
+                })
+                .with_children(|row| {
+                    for kind in PlantKind::ALL {
+                        row.spawn((
+                            Button,
+                            Node {
+                                width: Val::Px(118.0),
+                                padding: UiRect::axes(Val::Px(6.0), Val::Px(6.0)),
+                                flex_direction: FlexDirection::Column,
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                border_radius: BorderRadius::all(Val::Px(8.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.10, 0.16, 0.08, 0.85)),
+                            SeedButton(kind),
+                        ))
+                        .with_children(|card| {
+                            card.spawn((
+                                Text::new(""),
+                                TextFont {
+                                    font_size: 13.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.85, 0.93, 0.72)),
+                            ));
+                        });
+                    }
+                });
         });
 }
 
@@ -6278,12 +6368,14 @@ fn handle_board_input(
         }
     }
 
+    let mut clicked_board = false;
     if let Ok(window) = windows.single()
         && let Some((col, lane)) = cursor_grid_cell(window, &cameras)
         && (mouse.just_pressed(MouseButton::Left) || mouse.just_pressed(MouseButton::Right))
     {
         state.cursor_col = col;
         state.cursor_lane = lane;
+        clicked_board = true;
     }
 
     if keyboard.just_pressed(KeyCode::Backspace) || mouse.just_pressed(MouseButton::Right) {
@@ -6299,8 +6391,10 @@ fn handle_board_input(
         return;
     }
 
-    let wants_plant =
-        keyboard.just_pressed(KeyCode::Space) || mouse.just_pressed(MouseButton::Left);
+    // Mouse planting requires the click to land on a board tile, so UI
+    // clicks (seed cards, pause buttons) never place a plant as a side effect.
+    let wants_plant = keyboard.just_pressed(KeyCode::Space)
+        || (clicked_board && mouse.just_pressed(MouseButton::Left));
     if !wants_plant {
         return;
     }
@@ -7517,6 +7611,73 @@ fn move_projectiles(
     }
 }
 
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn announce_waves(
+    mut commands: Commands,
+    time: Res<Time>,
+    state: Res<BoardState>,
+    language: Res<LanguageSettings>,
+    localization: Res<LocalizationCatalog>,
+    mut last: Local<(u32, bool)>,
+    mut banners: Query<(Entity, &mut WaveBanner)>,
+    mut banner_texts: Query<&mut TextColor, With<WaveBannerText>>,
+) {
+    if state.wave <= 1 && !state.final_wave_started {
+        *last = (1, false);
+    }
+    let locale = localization.text(language.current);
+    let announce = if state.final_wave_started && !last.1 {
+        last.1 = true;
+        Some((locale.final_wave_warning.clone(), Color::srgb(1.0, 0.38, 0.30)))
+    } else if state.wave > last.0 {
+        last.0 = state.wave;
+        Some((
+            locale.wave_incoming.replace("{n}", &state.wave.to_string()),
+            Color::srgb(0.95, 0.86, 0.44),
+        ))
+    } else {
+        None
+    };
+    if let Some((message, color)) = announce {
+        commands
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(150.0),
+                    width: Val::Percent(100.0),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                WaveBanner {
+                    timer: Timer::from_seconds(2.2, TimerMode::Once),
+                },
+                HudUi,
+            ))
+            .with_children(|root| {
+                root.spawn((
+                    Text::new(message),
+                    TextFont {
+                        font_size: 44.0,
+                        ..default()
+                    },
+                    TextColor(color),
+                    WaveBannerText,
+                ));
+            });
+    }
+    for (entity, mut banner) in &mut banners {
+        banner.timer.tick(time.delta());
+        if banner.timer.is_finished() {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let fade = 1.0 - banner.timer.fraction().powi(3);
+        for mut text_color in &mut banner_texts {
+            text_color.0 = text_color.0.with_alpha(fade);
+        }
+    }
+}
+
 fn hit_react(
     mut commands: Commands,
     time: Res<Time>,
@@ -7775,6 +7936,7 @@ fn cleanup_dead(
     for (entity, zombie, transform) in &zombies {
         if zombie.health <= 0.0 {
             state.score += zombie.kind.score();
+            state.kills += 1;
             if matches!(zombie.kind, ZombieKind::Gargantuar | ZombieKind::Brute) {
                 shake.trauma = (shake.trauma + 0.4).min(1.0);
             }
@@ -7873,15 +8035,72 @@ fn update_hud(
     settings: Res<GameSettings>,
     pause: Res<PauseState>,
     mut status_query: Query<&mut Text, (With<HudStatusText>, Without<HudSeedBankText>)>,
-    mut seed_bank_query: Query<&mut Text, (With<HudSeedBankText>, Without<HudStatusText>)>,
 ) {
     let locale = localization.text(language.current);
     let level = &levels.levels[state.level_index];
     if let Ok(mut text) = status_query.single_mut() {
         **text = hud_status_text(locale, language.current, &state, level, &settings, &pause);
     }
-    if let Ok(mut text) = seed_bank_query.single_mut() {
-        **text = hud_seed_bank_text(locale, &state);
+}
+
+fn seed_card_clicks(
+    mut state: ResMut<BoardState>,
+    cards: Query<(&SeedButton, &Interaction), (Changed<Interaction>, With<Button>)>,
+) {
+    for (seed, interaction) in &cards {
+        if *interaction == Interaction::Pressed {
+            state.selected = seed.0;
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn update_seed_cards(
+    state: Res<BoardState>,
+    language: Res<LanguageSettings>,
+    localization: Res<LocalizationCatalog>,
+    mut cards: Query<(&SeedButton, &Interaction, &mut BackgroundColor, &Children)>,
+    mut texts: Query<(&mut Text, &mut TextColor)>,
+) {
+    let locale = localization.text(language.current);
+    for (seed, interaction, mut background, children) in &mut cards {
+        let kind = seed.0;
+        let index = kind.index();
+        let cooldown = state.plant_cooldowns[index];
+        let ready = state.sun >= kind.cost() && cooldown <= 0.0;
+        let target = if state.selected == kind {
+            Color::srgba(0.34, 0.50, 0.20, 0.95)
+        } else if *interaction == Interaction::Hovered {
+            Color::srgba(0.24, 0.34, 0.14, 0.90)
+        } else {
+            Color::srgba(0.10, 0.16, 0.08, 0.85)
+        };
+        if background.0 != target {
+            *background = BackgroundColor(target);
+        }
+        for child in children {
+            let Ok((mut text, mut color)) = texts.get_mut(*child) else {
+                continue;
+            };
+            let key = if index == 9 { 0 } else { index + 1 };
+            let cost_line = if cooldown > 0.0 {
+                format!("{}  {:.0}s", kind.cost(), cooldown.ceil())
+            } else {
+                kind.cost().to_string()
+            };
+            let line = format!("{key} {}\n{cost_line}", kind.label(locale));
+            if text.0 != line {
+                text.0 = line;
+            }
+            let text_target = if ready {
+                Color::srgb(0.85, 0.93, 0.72)
+            } else {
+                Color::srgb(0.50, 0.56, 0.48)
+            };
+            if color.0 != text_target {
+                color.0 = text_target;
+            }
+        }
     }
 }
 
@@ -7914,7 +8133,7 @@ fn spawn_game_over(
         &mut commands,
         &asset_server,
         &locale.game_over,
-        &end_subtitle(locale, GameState::GameOver, state.score),
+        &end_subtitle(locale, GameState::GameOver, &state),
     );
 }
 
@@ -7946,17 +8165,20 @@ fn spawn_victory(
         &mut commands,
         &asset_server,
         &locale.victory,
-        &end_subtitle(locale, GameState::Victory, state.score),
+        &end_subtitle(locale, GameState::Victory, &state),
     );
 }
 
-fn end_subtitle(locale: &LocaleText, game_state: GameState, score: u32) -> String {
+fn end_subtitle(locale: &LocaleText, game_state: GameState, state: &BoardState) -> String {
     let action = match game_state {
         GameState::GameOver => locale.retry.as_str(),
         GameState::Victory => locale.play_again.as_str(),
         _ => "",
     };
-    format!("{} {score} | {action}", locale.hud.score)
+    format!(
+        "{} {} | {} {} | {} {} | {action}",
+        locale.hud.score, state.score, locale.kills, state.kills, locale.hud.wave, state.wave
+    )
 }
 
 fn update_end_text(
@@ -7980,7 +8202,7 @@ fn update_end_text(
         **text = title_text.to_string();
     }
     if let Ok(mut text) = subtitle.single_mut() {
-        **text = end_subtitle(locale, *game_state.get(), state.score);
+        **text = end_subtitle(locale, *game_state.get(), &state);
     }
 }
 
@@ -8469,7 +8691,7 @@ mod tests {
         assert!(report.contains("sun pickup budget: 47"));
         assert!(report.contains("visual effect budget: 45"));
         assert!(report.contains("estimated dynamic entities: 275/320"));
-        assert!(report.contains("embedded asset bytes: 17034318/25000000"));
+        assert!(report.contains("embedded asset bytes: 17035445/25000000"));
         assert!(report.contains("checked viewport floor: compact-540p 960x540"));
         assert!(report.contains("manual performance QA still required"));
     }
