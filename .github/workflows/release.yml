@@ -91,6 +91,25 @@ jobs:
             echo "commit_sha=$(git rev-parse "$CHECKOUT_REF^{commit}")"
           } >> "$GITHUB_OUTPUT"
 
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_release_checks != 'false' }}
+
+      - uses: Swatinem/rust-cache@v2
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_release_checks != 'false' }}
+
+      - name: Install Linux validation dependencies
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_release_checks != 'false' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            g++ \
+            libasound2-dev \
+            libudev-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxkbcommon-dev \
+            pkg-config
+
       - name: Run full release checks
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_release_checks != 'false' }}
         run: |
