@@ -41,7 +41,7 @@ jobs:
       checkout_ref: ${{ steps.resolve.outputs.checkout_ref }}
       commit_sha: ${{ steps.resolve.outputs.commit_sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -104,7 +104,7 @@ jobs:
     needs:
       - release-meta
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-meta.outputs.checkout_ref }}
 
@@ -142,7 +142,7 @@ jobs:
           )
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bevy-open-siege-linux
           path: |
@@ -155,7 +155,7 @@ jobs:
     needs:
       - release-meta
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-meta.outputs.checkout_ref }}
 
@@ -197,7 +197,7 @@ jobs:
           )
 
       - name: Upload web artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bevy-open-siege-web
           path: |
@@ -210,7 +210,7 @@ jobs:
     needs:
       - release-meta
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-meta.outputs.checkout_ref }}
 
@@ -233,7 +233,7 @@ jobs:
           }
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bevy-open-siege-windows
           path: |
@@ -246,7 +246,7 @@ jobs:
     needs:
       - release-meta
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-meta.outputs.checkout_ref }}
 
@@ -270,7 +270,7 @@ jobs:
           )
 
       - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bevy-open-siege-macos
           path: |
@@ -287,26 +287,26 @@ jobs:
       - release-windows
       - release-macos
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-meta.outputs.checkout_ref }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: bevy-open-siege-linux
           path: artifacts
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: bevy-open-siege-web
           path: artifacts
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: bevy-open-siege-windows
           path: artifacts
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: bevy-open-siege-macos
           path: artifacts
@@ -562,7 +562,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-meta.outputs.checkout_ref }}
 
