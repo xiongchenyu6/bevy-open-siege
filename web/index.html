@@ -74,17 +74,18 @@
       const loading = document.getElementById("loading");
       const bar = loading.querySelector(".bar");
       const fill = document.querySelector("#progress > div");
+      const verificationKey = new URLSearchParams(window.location.search).get("release_verifier");
+      const cacheSuffix = verificationKey
+        ? `?release_verifier=${encodeURIComponent(verificationKey)}`
+        : "";
 
-      async function pickBackend() {
-        // One wasm binary supports one backend (bevy webgl2 XOR webgpu),
-        // so probe WebGPU and pick the matching bundle at runtime.
-        try {
-          if (navigator.gpu && (await navigator.gpu.requestAdapter())) {
-            return "webgpu";
-          }
-        } catch (_) {
-          /* fall through to WebGL2 */
+      function pickBackend() {
+        const requested = new URLSearchParams(window.location.search).get("backend");
+        if (requested === "webgl2" || requested === "webgpu") {
+          return requested;
         }
+        // WebGL2 is the release default. WebGPU remains available as an
+        // explicit opt-in while browser and driver behavior continues to vary.
         return "webgl2";
       }
 
@@ -117,10 +118,14 @@
         });
       }
 
-      const backend = await pickBackend();
+      const backend = pickBackend();
       try {
-        const { default: init } = await import(`./bevy_open_siege_${backend}.js`);
-        await init({ module_or_path: fetchWithProgress(`./bevy_open_siege_${backend}_bg.wasm`) });
+        const { default: init } = await import(`./bevy_open_siege_${backend}.js${cacheSuffix}`);
+        await init({
+          module_or_path: fetchWithProgress(
+            `./bevy_open_siege_${backend}_bg.wasm${cacheSuffix}`,
+          ),
+        });
         loading.remove();
       } catch (error) {
         // winit uses a JS exception for control flow on startup; anything else is real.

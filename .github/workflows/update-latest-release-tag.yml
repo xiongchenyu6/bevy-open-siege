@@ -1,0 +1,34 @@
+name: Update latest tag
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  update-latest:
+    name: Move latest tag to published release
+    runs-on: ubuntu-latest
+    if: "${{ github.event.release.draft == false && github.event.release.prerelease == false && startsWith(github.event.release.tag_name, 'v') }}"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Move latest tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          git config user.name 'GitHub Actions'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          RELEASE_COMMIT="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+          git tag -fa latest "$RELEASE_COMMIT" -m "Latest release $RELEASE_TAG"
+          git push origin refs/tags/latest --force

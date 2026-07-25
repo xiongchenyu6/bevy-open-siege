@@ -18,8 +18,8 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-cargo build --release --target "$X86_TARGET"
-cargo build --release --target "$ARM_TARGET"
+cargo build --locked --release --target "$X86_TARGET"
+cargo build --locked --release --target "$ARM_TARGET"
 
 if [[ ! -x "$X86_BINARY" || ! -x "$ARM_BINARY" ]]; then
   echo "macOS target binaries were not produced" >&2
@@ -32,6 +32,7 @@ mkdir -p "$DIST/assets"
 lipo -create "$X86_BINARY" "$ARM_BINARY" -output "$DIST/bevy_open_siege"
 chmod +x "$DIST/bevy_open_siege"
 RELEASE_BINARY="$DIST/bevy_open_siege"
+lipo -verify_arch x86_64 arm64 "$RELEASE_BINARY"
 
 "$RELEASE_BINARY" --validate-data
 "$RELEASE_BINARY" --audit-balance > "$ROOT/dist/balance-audit.txt"
@@ -101,6 +102,7 @@ cp "$ROOT/scripts/audio_smoke.sh" "$DIST/"
 cp "$ROOT/scripts/manual_qa_session.sh" "$DIST/"
 cp "$ROOT/scripts/platform_package_plan.sh" "$DIST/"
 cp "$ROOT/scripts/qa_evidence_summary.sh" "$DIST/"
+cp "$ROOT/scripts/qa_signoff_prepare.sh" "$DIST/"
 cp "$ROOT/scripts/final_signoff_check.sh" "$DIST/"
 cp "$ROOT/scripts/verify_release.sh" "$DIST/"
 cp "$ROOT/scripts/support_diagnostics.sh" "$DIST/"
@@ -109,7 +111,7 @@ cp "$ROOT/scripts/create_candidate_evidence.sh" "$DIST/"
 cp "$ROOT/scripts/create_store_submission_pack.sh" "$DIST/"
 cp "$ROOT/scripts/package_windows.ps1" "$DIST/"
 cp "$ROOT/scripts/package_macos.sh" "$DIST/"
-chmod +x "$DIST/runtime_smoke.sh" "$DIST/visual_smoke.sh" "$DIST/store_screenshot_check.sh" "$DIST/store_asset_audit.sh" "$DIST/content_rating_audit.sh" "$DIST/audio_smoke.sh" "$DIST/manual_qa_session.sh" "$DIST/platform_package_plan.sh" "$DIST/qa_evidence_summary.sh" "$DIST/final_signoff_check.sh" "$DIST/verify_release.sh" "$DIST/support_diagnostics.sh" "$DIST/signoff_bundle.sh" "$DIST/create_candidate_evidence.sh" "$DIST/create_store_submission_pack.sh" "$DIST/package_macos.sh"
+chmod +x "$DIST/runtime_smoke.sh" "$DIST/visual_smoke.sh" "$DIST/store_screenshot_check.sh" "$DIST/store_asset_audit.sh" "$DIST/content_rating_audit.sh" "$DIST/audio_smoke.sh" "$DIST/manual_qa_session.sh" "$DIST/platform_package_plan.sh" "$DIST/qa_evidence_summary.sh" "$DIST/qa_signoff_prepare.sh" "$DIST/final_signoff_check.sh" "$DIST/verify_release.sh" "$DIST/support_diagnostics.sh" "$DIST/signoff_bundle.sh" "$DIST/create_candidate_evidence.sh" "$DIST/create_store_submission_pack.sh" "$DIST/package_macos.sh"
 cp "$ROOT/assets/manifest.ron" "$DIST/assets/"
 cp -R "$ROOT/assets/art" "$DIST/assets/"
 cp -R "$ROOT/assets/audio" "$DIST/assets/"
@@ -118,9 +120,22 @@ cp -R "$ROOT/assets/data" "$DIST/assets/"
 cp -R "$ROOT/assets/i18n" "$DIST/assets/"
 cp -R "$ROOT/assets/models" "$DIST/assets/"
 
-"$ROOT/scripts/runtime_smoke.sh" "$RELEASE_BINARY" 12 > "$DIST/runtime-smoke.txt"
-"$ROOT/scripts/visual_smoke.sh" "$RELEASE_BINARY" 15 > "$DIST/visual-smoke.txt"
-"$ROOT/scripts/audio_smoke.sh" "$RELEASE_BINARY" 12 > "$DIST/audio-smoke.txt"
+cat > "$DIST/runtime-smoke.txt" <<'EOF'
+runtime startup smoke pending: run bevy_open_siege on the macOS release QA machine
+window: pending
+panic_scan: pending
+EOF
+cat > "$DIST/visual-smoke.txt" <<'EOF'
+visual startup smoke pending: capture a nonblank game screenshot on the macOS release QA machine
+window: pending
+screenshot: pending
+panic_scan: pending
+EOF
+cat > "$DIST/audio-smoke.txt" <<'EOF'
+audio startup smoke pending: run bevy_open_siege --audio on the macOS release QA machine
+window: pending
+panic_scan: pending
+EOF
 "$ROOT/scripts/store_asset_audit.sh" "$DIST" > "$DIST/store-asset-audit.txt"
 "$ROOT/scripts/content_rating_audit.sh" "$DIST" > "$DIST/content-rating-audit.txt"
 "$ROOT/scripts/manual_qa_session.sh" --plan "$DIST" > "$DIST/manual-qa-plan.txt"
@@ -128,13 +143,16 @@ cp -R "$ROOT/assets/models" "$DIST/assets/"
 "$ROOT/scripts/final_signoff_check.sh" --plan "$DIST" > "$DIST/final-signoff-plan.txt"
 python3 "$ROOT/scripts/generate_release_manifest.py" "$DIST" "macos-universal" > "$DIST/release-manifest.json"
 
+MANIFEST_TMP="$(mktemp)"
+trap 'rm -f "$MANIFEST_TMP"' EXIT
 (
   cd "$DIST"
-  find . -type f ! -name SHA256SUMS -print0 \
-    | sort -z \
-    | xargs -0 shasum -a 256 \
-    | sed 's#  ./#  #' > SHA256SUMS
+  find . -type f ! -name SHA256SUMS -exec shasum -a 256 {} \; \
+    | LC_ALL=C sort \
+    | sed 's#  ./#  #' > "$MANIFEST_TMP"
 )
+mv "$MANIFEST_TMP" "$DIST/SHA256SUMS"
+trap - EXIT
 
 tar -C "$ROOT/dist" -czf "$ROOT/dist/${PACKAGE}.tar.gz" "$PACKAGE"
 echo "Created dist/${PACKAGE}.tar.gz"

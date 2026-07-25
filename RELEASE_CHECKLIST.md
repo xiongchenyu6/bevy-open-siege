@@ -4,6 +4,17 @@ Bevy Open Siege is not yet production-ready, but this checklist defines the conc
 
 ## Required Before Release
 
+- In GitHub, create and push a release tag like `v0.1.0` (or trigger `.github/workflows/release.yml` with `release_tag`) and let the release pipeline complete.
+- Verify `release.yml` uploads the Linux/Web/Windows/macOS artifacts for that tag and that every artifact has a matching `.sha256` entry.
+- Verify the Web archive contains WebGL2 and WebGPU JavaScript/WASM pairs, `web-build-info.txt`, `SHA256SUMS`, and the complete `assets/` tree; run `scripts/verify_web_bundle.sh` against the extracted archive.
+- Verify the tag appears as a published GitHub Release and that `release-assets/*` includes the generated `bevy_open_siege-<version>-release-metadata.txt`.
+- For a stable release, verify the release workflow waits for `Deploy Pages release <tag>`, and that its prepare, deploy, online hash/MIME verification, dual-WASM/browser validation, WebGPU adapter probe, and real-level WebGL2 canvas smoke steps all pass.
+- Download and retain the `pages-verification-<run-id>` artifact containing the online verification log, canvas screenshot, build provenance, and deployed checksum manifest.
+- Run `scripts/verify_github_release.sh <tag>` to redownload all assets, deep-verify every native archive and internal checksum manifest, validate the Web bundle, prove tag/release/`latest` commit identity, require a successful release Pages run, and compare every live Pages file with the published Web archive.
+- Do not deploy prereleases over the stable public Pages site; their Web archives still must pass all local package validation.
+- For a stable release, verify repository `latest` resolves to the released commit; prereleases must leave it unchanged.
+- Run the `Post-release version bump` workflow (`.github/workflows/post-release-bump.yml`) to advance `Cargo.toml`, `Cargo.lock`, and `VERSION.ron` to the next `-dev` version. Its default mode commits to the default branch; `create_pr=true` requires the repository setting that allows GitHub Actions to create pull requests.
+
 - Verify runtime UI chrome sprites from `assets/art/ui/` render clearly in menu, HUD, pause, and end screens.
 - Verify runtime projectile, sun pickup, fire, and explosion sprites from `assets/art/effects/` render clearly at gameplay camera distance.
 - Verify runtime board environment textures from `assets/art/environment/` render clearly at gameplay camera distance.

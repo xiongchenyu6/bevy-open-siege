@@ -1,0 +1,140 @@
+name: Post-release version bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      next_version:
+        description: "Next dev version (default: auto-increment patch and add -dev)"
+        type: string
+        required: false
+      create_pr:
+        description: "Open a pull request (requires the repository Actions PR setting)"
+        type: boolean
+        default: false
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Resolve next development version
+        id: resolve
+        run: |
+          set -euo pipefail
+          current_version="$(awk -F'"' '/^version = / {print $2; exit}' Cargo.toml)"
+          if [ -z "$current_version" ]; then
+            echo "::error::Could not read version from Cargo.toml"
+            exit 1
+          fi
+
+          requested="${{ github.event.inputs.next_version }}"
+          if [ -n "$requested" ]; then
+            if [[ ! "$requested" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+$ ]]; then
+              echo "::error::Requested next_version is invalid semver with prerelease: $requested"
+              exit 1
+            fi
+            next_version="$requested"
+          else
+            if [[ ! "$current_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-.+)?$ ]]; then
+              echo "::error::Current version is not semver x.y.z[...]: $current_version"
+              exit 1
+            fi
+            next_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))-dev"
+          fi
+
+          if [ -z "${next_version}" ]; then
+            echo "::error::Could not resolve next version"
+            exit 1
+          fi
+          echo "next_version=$next_version" >> "$GITHUB_OUTPUT"
+
+      - name: Update Cargo.toml and VERSION.ron
+        env:
+          NEXT_VERSION: ${{ steps.resolve.outputs.next_version }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          import pathlib
+
+          next_version = os.environ["NEXT_VERSION"]
+
+          cargo_toml = pathlib.Path("Cargo.toml")
+          text = cargo_toml.read_text()
+          if not re.search(r'^version = ".*"$', text, flags=re.M):
+            raise SystemExit("Could not find package version in Cargo.toml")
+          text = re.sub(r'^version = ".*"$', f'version = "{next_version}"', text, count=1, flags=re.M)
+          cargo_toml.write_text(text)
+
+          version_ron = pathlib.Path("VERSION.ron")
+          text = version_ron.read_text()
+          text, count = re.subn(r'(?m)^(\s*version:\s*)"[^"]+"', rf'\1"{next_version}"', text, count=1)
+          if count != 1:
+            raise SystemExit("Could not update VERSION.ron version field")
+          version_ron.write_text(text)
+          PY
+
+      - name: Refresh Cargo.lock
+        run: |
+          cargo metadata --format-version 1 >/dev/null
+
+      - name: Verify version consistency
+        id: verify
+        run: |
+          set -euo pipefail
+          cargo_version="$(awk -F'"' '/^version = / {print $2; exit}' Cargo.toml)"
+          ron_version="$(awk -F'"' '/^[[:space:]]*version:[[:space:]]*/ {print $2; exit}' VERSION.ron)"
+          lock_version="$(awk '$0 == "name = \"bevy_open_siege\"" {found = 1; next} found && /^version = / {gsub(/"/, "", $3); print $3; exit}' Cargo.lock)"
+          if [ "$cargo_version" != "$ron_version" ] || [ "$cargo_version" != "$lock_version" ]; then
+            echo "::error::Version mismatch: Cargo.toml=$cargo_version VERSION.ron=$ron_version Cargo.lock=$lock_version"
+            exit 1
+          fi
+
+          echo "match=true" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether files changed
+        id: changed
+        run: |
+          set -euo pipefail
+          if git diff --quiet Cargo.toml Cargo.lock VERSION.ron; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit version bump
+        env:
+          NEXT_VERSION: ${{ steps.resolve.outputs.next_version }}
+        if: ${{ steps.changed.outputs.has_changes == 'true' && github.event.inputs.create_pr != 'true' }}
+        run: |
+          set -euo pipefail
+          git config user.name 'Bevy Open Siege Bot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Cargo.toml Cargo.lock VERSION.ron
+          git commit -m "Bump version to ${NEXT_VERSION}"
+          git push origin "HEAD:${{ github.event.repository.default_branch }}"
+
+      - name: Open post-release version bump PR
+        if: ${{ github.event.inputs.create_pr == 'true' && steps.changed.outputs.has_changes == 'true' }}
+        uses: peter-evans/create-pull-request@v8
+        with:
+          commit-message: "Bump version to ${{ steps.resolve.outputs.next_version }}"
+          branch: "chore/post-release-version-bump"
+          title: "Bump version after release"
+          body: |
+            Automated post-release version bump.
+            This updates `Cargo.toml`, `Cargo.lock`, and `VERSION.ron` to `${{ steps.resolve.outputs.next_version }}`.
+          delete-branch: true

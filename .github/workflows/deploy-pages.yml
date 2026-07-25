@@ -1,9 +1,25 @@
 name: Deploy web build to GitHub Pages
 
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' && format('Deploy Pages release {0} (release run {1})', inputs.release_tag, inputs.release_run_id) || github.event_name == 'workflow_dispatch' && format('Deploy Pages branch {0}', github.ref_name) || format('Verify Pages candidate {0}', github.sha) }}
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Published release tag to deploy; blank builds the selected branch"
+        type: string
+        required: false
+      expected_commit:
+        description: "Optional full commit SHA required for the release tag"
+        type: string
+        required: false
+      release_run_id:
+        description: "Originating release workflow run ID for traceability"
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -12,68 +28,177 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  build:
+  prepare:
+    name: Prepare and verify Pages artifact
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - uses: dtolnay/rust-toolchain@stable
+        if: ${{ inputs.release_tag == '' }}
         with:
           targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
+        if: ${{ inputs.release_tag == '' }}
 
-      - name: Install wasm-bindgen-cli (version from Cargo.lock)
+      - name: Install pinned Web build tools
+        if: ${{ inputs.release_tag == '' }}
         run: |
-          VERSION=$(grep -A1 'name = "wasm-bindgen"$' Cargo.lock | grep version | cut -d'"' -f2)
-          echo "wasm-bindgen ${VERSION}"
-          curl -sSL "https://github.com/rustwasm/wasm-bindgen/releases/download/${VERSION}/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl.tar.gz" | tar xz
-          echo "${PWD}/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl" >> "$GITHUB_PATH"
+          set -euo pipefail
+          WASM_BINDGEN_VERSION="$(awk '$0 == "name = \"wasm-bindgen\"" {found = 1; next} found && /^version = / {gsub(/"/, "", $3); print $3; exit}' Cargo.lock)"
+          test -n "$WASM_BINDGEN_VERSION"
+          curl -sSfL "https://github.com/rustwasm/wasm-bindgen/releases/download/${WASM_BINDGEN_VERSION}/wasm-bindgen-${WASM_BINDGEN_VERSION}-x86_64-unknown-linux-musl.tar.gz" | tar xz
+          echo "${PWD}/wasm-bindgen-${WASM_BINDGEN_VERSION}-x86_64-unknown-linux-musl" >> "$GITHUB_PATH"
 
-      - name: Build wasm binaries (WebGL2 + WebGPU)
+          BINARYEN_VERSION="version_123"
+          curl -sSfL "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" | tar xz
+          echo "${PWD}/binaryen-${BINARYEN_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Build and verify branch Web bundle
+        if: ${{ inputs.release_tag == '' }}
+        env:
+          WEB_BUILD_COMMIT: ${{ github.sha }}
+          WEB_BUILD_REF: ${{ github.ref }}
+          WEB_REQUIRE_WASM_OPT: "1"
         run: |
-          mkdir -p web-dist
-          cargo build --profile web-release --target wasm32-unknown-unknown
-          wasm-bindgen --no-typescript --target web \
-            --out-dir web-dist --out-name bevy_open_siege_webgl2 \
-            target/wasm32-unknown-unknown/web-release/bevy_open_siege.wasm
-          cargo build --profile web-release --target wasm32-unknown-unknown --features webgpu
-          wasm-bindgen --no-typescript --target web \
-            --out-dir web-dist --out-name bevy_open_siege_webgpu \
-            target/wasm32-unknown-unknown/web-release/bevy_open_siege.wasm
+          set -euo pipefail
+          ./scripts/build_web_bundle.sh web-dist
 
-      - name: Shrink wasm with wasm-opt
+      - name: Download and verify published release Web bundle
+        if: ${{ inputs.release_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
         run: |
-          BINARYEN=version_123
-          curl -sSL "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN}/binaryen-${BINARYEN}-x86_64-linux.tar.gz" | tar xz
-          for wasm in web-dist/*_bg.wasm; do
-            before=$(stat -c%s "$wasm")
-            "binaryen-${BINARYEN}/bin/wasm-opt" -Oz \
-              --enable-bulk-memory --enable-nontrapping-float-to-int \
-              "$wasm" -o "$wasm.opt"
-            mv "$wasm.opt" "$wasm"
-            after=$(stat -c%s "$wasm")
-            echo "$wasm: $before -> $after bytes"
-          done
+          set -euo pipefail
 
-      - name: Assemble web bundle
-        run: |
-          cp web/index.html web/favicon.png web-dist/
-          cp -r assets web-dist/assets
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "release_tag must be a semantic version tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          if [ -n "$EXPECTED_COMMIT" ] && [[ ! "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "expected_commit must be a full lowercase Git SHA" >&2
+            exit 1
+          fi
+          if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" != "false" ]; then
+            echo "release is missing or still a draft: $RELEASE_TAG" >&2
+            exit 1
+          fi
 
-      - uses: actions/upload-pages-artifact@v3
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          RELEASE_COMMIT="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+          if [ -n "$EXPECTED_COMMIT" ] && [ "$RELEASE_COMMIT" != "$EXPECTED_COMMIT" ]; then
+            echo "release commit mismatch: expected $EXPECTED_COMMIT, found $RELEASE_COMMIT" >&2
+            exit 1
+          fi
+
+          VERSION="${RELEASE_TAG#v}"
+          VERSION="${VERSION%%-*}"
+          PACKAGE="bevy_open_siege-${VERSION}-web.tar.gz"
+          mkdir -p release-web web-dist
+          gh release download "$RELEASE_TAG" \
+            --pattern "$PACKAGE" \
+            --pattern "$PACKAGE.sha256" \
+            --dir release-web
+          (
+            cd release-web
+            sha256sum -c "$PACKAGE.sha256"
+          )
+
+          tar -tzf "release-web/$PACKAGE" > release-web/archive-files.txt
+          if grep -Eq '(^/|(^|/)\.\.(/|$))' release-web/archive-files.txt; then
+            echo "release Web archive contains an unsafe path" >&2
+            exit 1
+          fi
+          tar -xzf "release-web/$PACKAGE" -C web-dist
+          ./scripts/verify_web_bundle.sh \
+            web-dist \
+            --expected-version "$VERSION" \
+            --expected-commit "$RELEASE_COMMIT" \
+            --expected-ref "$RELEASE_TAG"
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload verified Pages artifact
+        uses: actions/upload-pages-artifact@v4
         with:
           path: web-dist
 
   deploy:
-    needs: build
+    name: Deploy and verify GitHub Pages
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs: prepare
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - id: deployment
+      - name: Deploy to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
+
+      - uses: actions/checkout@v4
+
+      - name: Download deployed Pages artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: pages-artifact
+
+      - name: Extract expected Pages contents
+        run: |
+          set -euo pipefail
+          PAGES_TAR="$(find pages-artifact -type f -name artifact.tar -print -quit)"
+          test -n "$PAGES_TAR"
+          mkdir -p expected-pages
+          tar -xf "$PAGES_TAR" -C expected-pages
+          ./scripts/verify_web_bundle.sh expected-pages
+
+      - name: Verify every deployed file and runtime MIME type
+        env:
+          PAGES_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          ./scripts/verify_pages_deployment.sh "$PAGES_URL" expected-pages | tee pages-verification.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install browser smoke-test runtime
+        run: |
+          npm install --no-save --no-package-lock @playwright/test@1.61.1
+          npx playwright install --with-deps chromium
+
+      - name: Validate both WASM artifacts and launch WebGL2 in Chromium
+        env:
+          PAGES_URL: ${{ steps.deployment.outputs.page_url }}
+          PAGES_SMOKE_SCREENSHOT: test-results/pages-smoke.png
+        run: |
+          npx playwright test scripts/pages_smoke.spec.cjs --reporter=line --workers=1
+
+      - name: Upload Pages verification evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-verification-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            pages-verification.txt
+            test-results/pages-smoke.png
+            expected-pages/web-build-info.txt
+            expected-pages/SHA256SUMS

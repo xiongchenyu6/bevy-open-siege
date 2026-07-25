@@ -21,7 +21,7 @@ $TargetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Pa
 $ReleaseBinary = Join-Path $TargetDir "$Target\release\bevy_open_siege.exe"
 
 if (-not $SkipBuild) {
-    cargo build --release --target $Target
+    cargo build --locked --release --target $Target
 }
 if (-not (Test-Path $ReleaseBinary)) {
     throw "release binary not found: $ReleaseBinary"
@@ -115,6 +115,7 @@ Copy-Item -Recurse (Join-Path $Root "assets\models") (Join-Path $Dist "assets")
 Copy-Item (Join-Path $Root "scripts\manual_qa_session.sh") $Dist
 Copy-Item (Join-Path $Root "scripts\platform_package_plan.sh") $Dist
 Copy-Item (Join-Path $Root "scripts\qa_evidence_summary.sh") $Dist
+Copy-Item (Join-Path $Root "scripts\qa_signoff_prepare.sh") $Dist
 Copy-Item (Join-Path $Root "scripts\final_signoff_check.sh") $Dist
 Copy-Item (Join-Path $Root "scripts\verify_release.sh") $Dist
 Copy-Item (Join-Path $Root "scripts\support_diagnostics.sh") $Dist

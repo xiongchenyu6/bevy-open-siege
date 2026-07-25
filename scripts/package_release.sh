@@ -19,7 +19,7 @@ BUILD_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 if [[ "$USE_NIX" == "1" ]]; then
   BUILD_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/bevy_open_siege_package_target}"
   rm -rf "$ROOT/target"
-  nix develop "path:$ROOT" --command env CARGO_TARGET_DIR="$BUILD_TARGET_DIR" cargo build --release
+  nix develop "path:$ROOT" --command env CARGO_TARGET_DIR="$BUILD_TARGET_DIR" cargo build --locked --release
   NIX_ENV_FILE="$(mktemp)"
   nix develop "path:$ROOT" --command bash -lc \
     'printf "export PATH=%q\nexport LD_LIBRARY_PATH=%q\n" "$PATH" "${LD_LIBRARY_PATH:-}"' \
@@ -28,7 +28,7 @@ if [[ "$USE_NIX" == "1" ]]; then
   source "$NIX_ENV_FILE"
   rm -f "$NIX_ENV_FILE"
 else
-  cargo build --release
+  cargo build --locked --release
 fi
 RELEASE_BINARY="$BUILD_TARGET_DIR/release/bevy_open_siege"
 mkdir -p "$ROOT/dist"
@@ -260,13 +260,17 @@ cp -R "$ROOT/assets/models" "$DIST/assets/"
 "$ROOT/scripts/final_signoff_check.sh" --plan "$DIST" > "$DIST/final-signoff-plan.txt"
 python3 "$ROOT/scripts/generate_release_manifest.py" "$DIST" "linux-x86_64" > "$DIST/release-manifest.json"
 
+MANIFEST_TMP="$(mktemp)"
+trap 'rm -f "$MANIFEST_TMP"' EXIT
 (
   cd "$DIST"
   find . -type f ! -name SHA256SUMS -print0 \
     | sort -z \
     | xargs -0 sha256sum \
-    | sed 's#  ./#  #' > SHA256SUMS
+    | sed 's#  ./#  #' > "$MANIFEST_TMP"
 )
+mv "$MANIFEST_TMP" "$DIST/SHA256SUMS"
+trap - EXIT
 
 tar -C "$ROOT/dist" -czf "$ROOT/dist/${PACKAGE}.tar.gz" "$PACKAGE"
 "$ROOT/scripts/smoke_release_archive.sh" "$ROOT/dist/${PACKAGE}.tar.gz"

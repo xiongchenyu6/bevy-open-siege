@@ -2001,7 +2001,8 @@ fn save_audit_report() -> Result<String, String> {
     lines.push(format!("xdg data path | {}", xdg_path.display()));
 
     let home_path = save_path_from_env(None, None, Some(PathBuf::from("/home/player")));
-    if home_path != Path::new("/home/player/.local/share/bevy_open_siege/bevy_open_siege_save.ron") {
+    if home_path != Path::new("/home/player/.local/share/bevy_open_siege/bevy_open_siege_save.ron")
+    {
         return Err(format!(
             "home fallback save path resolved unexpectedly: {}",
             home_path.display()
@@ -4168,7 +4169,7 @@ fn zombie_pool_for_wave(level_index: usize, wave: u32, final_wave: bool) -> Vec<
 }
 
 fn raw_zombie_pool_for_wave(wave: u32) -> Vec<ZombieKind> {
-    let pool = match wave {
+    match wave {
         1 => vec![ZombieKind::Walker],
         2 => vec![ZombieKind::Walker, ZombieKind::Conehead],
         3 => vec![ZombieKind::Walker, ZombieKind::Conehead, ZombieKind::Runner],
@@ -4213,8 +4214,7 @@ fn raw_zombie_pool_for_wave(wave: u32) -> Vec<ZombieKind> {
             ZombieKind::Brute,
             ZombieKind::Gargantuar,
         ],
-    };
-    pool
+    }
 }
 
 fn simulate_campaign() -> Result<CampaignSimulationReport, String> {
@@ -4740,6 +4740,7 @@ fn main() {
     let plugins = DefaultPlugins
         .set(bevy::asset::AssetPlugin {
             file_path: runtime_asset_root(),
+            meta_check: bevy::asset::AssetMetaCheck::Never,
             ..default()
         })
         .set(WindowPlugin {
@@ -5387,8 +5388,7 @@ fn drain_web_audio(
     use bevy::audio::Volume;
 
     if !*interacted
-        && (keys.get_just_pressed().next().is_some()
-            || mouse.get_just_pressed().next().is_some())
+        && (keys.get_just_pressed().next().is_some() || mouse.get_just_pressed().next().is_some())
     {
         *interacted = true;
     }
@@ -5643,10 +5643,7 @@ fn setup_ui_fonts(mut commands: Commands, asset_server: Res<AssetServer>) {
 fn apply_language_font(
     language: Res<LanguageSettings>,
     fonts: Res<UiFonts>,
-    mut texts: ParamSet<(
-        Query<&mut TextFont>,
-        Query<&mut TextFont, Added<TextFont>>,
-    )>,
+    mut texts: ParamSet<(Query<&mut TextFont>, Query<&mut TextFont, Added<TextFont>>)>,
 ) {
     let font = match language.current {
         Language::Chinese => fonts.cjk.clone(),
@@ -6398,14 +6395,16 @@ fn handle_board_input(
     // A tap acts like a left click at the touch position (phones/tablets
     // have no separate cursor), while mouse clicks use the hover position.
     let mut clicked_board = false;
-    let tap_position = touches.iter_just_pressed().next().map(|touch| touch.position());
-    let pointer_position = if mouse.just_pressed(MouseButton::Left)
-        || mouse.just_pressed(MouseButton::Right)
-    {
-        windows.single().ok().and_then(Window::cursor_position)
-    } else {
-        tap_position
-    };
+    let tap_position = touches
+        .iter_just_pressed()
+        .next()
+        .map(|touch| touch.position());
+    let pointer_position =
+        if mouse.just_pressed(MouseButton::Left) || mouse.just_pressed(MouseButton::Right) {
+            windows.single().ok().and_then(Window::cursor_position)
+        } else {
+            tap_position
+        };
     if let Some(position) = pointer_position
         && let Some((col, lane)) = position_grid_cell(position, &cameras)
     {
@@ -6695,7 +6694,10 @@ fn update_onboarding(
     }
     match onboarding.step {
         0 => {
-            if plants.iter().any(|plant| plant.kind == PlantKind::Sunflower) {
+            if plants
+                .iter()
+                .any(|plant| plant.kind == PlantKind::Sunflower)
+            {
                 onboarding.step = 1;
             }
         }
@@ -6705,7 +6707,10 @@ fn update_onboarding(
             }
         }
         2 => {
-            if plants.iter().any(|plant| plant.kind != PlantKind::Sunflower) {
+            if plants
+                .iter()
+                .any(|plant| plant.kind != PlantKind::Sunflower)
+            {
                 onboarding.step = 3;
                 onboarding.timer = Timer::from_seconds(8.0, TimerMode::Once);
             }
@@ -7663,7 +7668,10 @@ fn announce_waves(
     let locale = localization.text(language.current);
     let announce = if state.final_wave_started && !last.1 {
         last.1 = true;
-        Some((locale.final_wave_warning.clone(), Color::srgb(1.0, 0.38, 0.30)))
+        Some((
+            locale.final_wave_warning.clone(),
+            Color::srgb(1.0, 0.38, 0.30),
+        ))
     } else if state.wave > last.0 {
         last.0 = state.wave;
         Some((
@@ -7743,14 +7751,11 @@ fn shake_camera(
     let t = time.elapsed_secs();
     for (mut transform, rig) in &mut cameras {
         transform.translation = rig.base
-            + Vec3::new(
-                (t * 37.0).sin(),
-                (t * 47.0).cos() * 0.6,
-                (t * 29.0).sin(),
-            ) * amount;
+            + Vec3::new((t * 37.0).sin(), (t * 47.0).cos() * 0.6, (t * 29.0).sin()) * amount;
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn animate_units(
     time: Res<Time>,
     mut plants: Query<(&mut Transform, &Plant), Without<Zombie>>,
@@ -7775,6 +7780,7 @@ fn animate_units(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn tag_limbs(
     mut commands: Commands,
     parts: Query<(Entity, &Name, &Transform), (Without<LimbAnim>, With<ChildOf>)>,
@@ -7941,6 +7947,7 @@ fn collect_sun(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cleanup_dead(
     mut commands: Commands,
     mut state: ResMut<BoardState>,
@@ -8078,6 +8085,7 @@ fn update_hud(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn seed_card_clicks(
     mut state: ResMut<BoardState>,
     cards: Query<(&SeedButton, &Interaction), (Changed<Interaction>, With<Button>)>,

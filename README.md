@@ -108,6 +108,39 @@ Create a Linux x86_64 release archive:
 
 Set `BEVY_OPEN_SIEGE_USE_NIX=1` to build the package through the Nix dev shell.
 
+To publish via GitHub Release, push a tag like `v0.1.0` (or run the workflow manually with an explicit `release_tag` like `v0.1.0`).
+The workflow validates that the tag version matches `Cargo.toml` and publishes artifacts from that tag's checked-out commit.
+`.github/workflows/release.yml` runs `scripts/package_release.sh`, computes `dist/<package>.tar.gz.sha256`, and uploads both files to the tag release with `RELEASE_NOTES.md` as the release body.
+
+Manual dispatch also supports optional crate publication (`publish_to_crates_io`) to publish `bevy_open_siege` to crates.io from the same release tag. Leave it `false` unless you intentionally want to publish a crate release, and ensure `CARGO_REGISTRY_TOKEN` is configured as a repository secret.
+
+The GitHub Release pipeline now also builds and uploads platform/web artifacts on tag push:
+
+- `bevy_open_siege-<version>-linux-x86_64.tar.gz`
+- `bevy_open_siege-<version>-web.tar.gz` (WASM WebGL2/WebGPU bundle)
+- `bevy_open_siege-<version>-windows-x86_64.zip`
+- `bevy_open_siege-<version>-macos-universal.tar.gz`
+
+Each platform artifact is accompanied by its `<file>.sha256`, and the release is marked as prerelease when the tag includes a prerelease suffix (for example `v0.1.0-beta.1`).
+On publish, the workflow verifies every outer `.sha256`, then uses `scripts/verify_platform_archive.sh` to reject unsafe archive paths and validate each native package's root layout, binary format, release manifest, and complete internal `SHA256SUMS` inventory before uploading. It retries release publication with clobber update semantics for transient GitHub API failures.
+The release also uploads a generated metadata snapshot (`bevy_open_siege-<version>-release-metadata.txt`) with tag, commit, workflow run, actor, and artifact checksum summary.
+The Web archive contains both the WebGL2 and WebGPU wasm-bindgen bundles, `web-build-info.txt`, and a complete `SHA256SUMS`. `scripts/verify_web_bundle.sh` checks the two WASM headers and sizes, validates them with available WASM runtimes, and proves that every packaged file is covered exactly once by the internal checksum manifest. Pages uses WebGL2 by default; WebGPU remains an explicit `?backend=webgpu` opt-in until its Bevy/browser/driver matrix has completed release-hardware QA.
+
+The same build entry point is used by releases and branch Pages builds:
+
+```bash
+./scripts/build_web_bundle.sh web-dist
+./scripts/verify_web_bundle.sh web-dist
+```
+
+`wasm-bindgen` must match the version in `Cargo.lock`. Set `WEB_REQUIRE_WASM_OPT=1` for a production build where missing `wasm-opt` must fail instead of producing an unoptimized bundle.
+
+Stable releases automatically dispatch `.github/workflows/deploy-pages.yml` on `main`. That workflow downloads the published Web release asset, verifies its external checksum and internal manifest, deploys those exact bytes, downloads every live Pages file for SHA256 comparison, checks JavaScript/WASM MIME types, validates both WASM files and loaders in Chromium, probes a WebGPU adapter, and starts a real WebGL2 level while capturing a non-empty canvas screenshot. Normal `main` pushes build and verify a candidate artifact but do not overwrite the public site; a blank manual dispatch can explicitly deploy a branch build. Prereleases are fully package-verified but do not replace the public stable Pages build.
+
+When a stable release is published, the release job and a dedicated fallback workflow update the repository `latest` tag to that release commit so downstream automation can track the newest public release. Prereleases do not move `latest`.
+
+After release completion, run the `Post-release version bump` workflow to move `Cargo.toml`, `Cargo.lock`, and `VERSION.ron` to the next development version (default: patch+1 with `-dev`, for example `0.1.1-dev`) and create a PR with the bump.
+
 The package includes the binary, gameplay data, localization data, Blender-generated 3D GLB unit models, production PNG art, fallback SVG branding, press kit, README, privacy notice, content rating notes, support guide, troubleshooting runbook, support diagnostics helper, signoff evidence bundle helper, candidate evidence helper, store submission pack helper, machine-readable release manifest, build provenance notes, license, credits, art asset notes, third-party notices, generated Cargo dependency license report, store-page copy, store screenshot checklist, version metadata, release checklist, audio mix audit report, privacy/support audit report, release provenance audit report, store asset audit report, content rating audit report, Linux package audit report, Linux installed-launcher smoke report, Linux dependency audit report, Linux sanitized-environment portability smoke report, Linux clean-distro container smoke report, Linux desktop metadata audit report, manual QA session plan, manual QA observations helper, cross-platform package plan, QA evidence summary helper, package verification helper, final signoff plan, Windows/macOS package scripts, runtime, visual, and audio startup smoke reports, and manual QA signoff template.
 
 The package script runs the release binary with `--validate-data`, `--audit-balance`, `--audit-assets`, `--audit-audio`, `--audit-controls`, `--audit-input-flow`, `--audit-localization`, `--audit-layout`, `--audit-visual`, `--audit-accessibility`, `--audit-performance`, `--audit-privacy`, `--audit-release-provenance`, `--audit-marketing`, `--audit-ip`, `--audit-save`, `--audit-playthrough`, `--simulate-campaign`, and `--release-readiness`, then runs `scripts/runtime_smoke.sh`, `scripts/visual_smoke.sh`, `scripts/audio_smoke.sh`, `scripts/store_asset_audit.sh`, `scripts/content_rating_audit.sh`, `scripts/linux_package_audit.sh`, `scripts/linux_install_smoke.sh`, `scripts/linux_dependency_audit.sh`, `scripts/linux_portability_smoke.sh`, `scripts/linux_clean_distro_smoke.sh`, and `scripts/linux_metadata_audit.sh` against the release package before creating the archive. It writes `release-manifest.json` and `SHA256SUMS` for package inventory and integrity, includes visual/audio/runtime/Linux package smoke helpers for QA, then runs `scripts/smoke_release_archive.sh` against the generated tarball.
@@ -115,6 +148,51 @@ The package script runs the release binary with `--validate-data`, `--audit-bala
 After extracting the archive, `./verify_release.sh --quick .` verifies SHA256 integrity, `release-manifest.json`, release metadata, deterministic audit reports, Linux portability evidence, and generated QA plans without opening a window. Use `./verify_release.sh --full .` on a QA machine with display/audio support to include runtime, visual, audio, and sanitized-environment Linux portability startup smoke checks.
 
 The archive also includes Linux desktop integration metadata under `assets/linux/`: a `.desktop` launcher and AppStream metainfo XML for downstream package managers.
+
+## Release Operations
+
+A full publish cycle:
+
+1. Prepare and push a tag:
+
+```bash
+git tag -a v0.1.0 -m "v0.1.0"
+git push origin v0.1.0
+```
+
+2. Wait for `.github/workflows/release.yml` to finish:
+   - Linux/Web/Windows/macOS artifacts are uploaded to the GitHub Release.
+   - Each artifact has a `.sha256` file in the same release.
+   - `bevy_open_siege-<version>-release-metadata.txt` is attached.
+   - The release is marked as prerelease when the tag includes a prerelease suffix.
+   - For a stable tag, the workflow waits for the release-backed Pages deployment and browser smoke test.
+
+3. Run the end-to-end release verification from local:
+
+```bash
+./scripts/verify_github_release.sh v0.1.0
+```
+
+This redownloads all release assets, validates every outer checksum, deep-verifies the Linux, Windows, and macOS package manifests and internal checksums, deeply verifies both WASM bundles, and checks release/tag commit identity. For stable releases it also checks `latest`, requires the release Pages workflow to be green, and compares every live Pages file with the published Web archive. Prereleases leave `latest` and public Pages unchanged. Use `--skip-pages` only when diagnosing a package independently of the public deployment.
+
+4. Confirm the `latest` tag move:
+
+```bash
+git fetch --tags origin
+git show-ref --tags | grep "refs/tags/latest"
+```
+
+5. Download the `pages-verification-<run-id>` Actions artifact and retain `pages-verification.txt`, `pages-smoke.png`, `web-build-info.txt`, and `SHA256SUMS` with the release evidence.
+
+6. Run post-release version bump. The default mode commits the bump directly to the repository default branch:
+
+```bash
+gh workflow run post-release-bump.yml -f create_pr=false -f next_version=0.1.1-dev
+```
+
+7. For review-first mode, first enable **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**, then run `gh workflow run post-release-bump.yml -f create_pr=true`.
+
+8. (Optional) To publish crate metadata in `crates.io`, rerun the release workflow manually from a tagged ref and set `publish_to_crates_io=true` (requires `CARGO_REGISTRY_TOKEN`).
 
 After extracting the archive, Linux users can run `./install_linux_user.sh` for a user-local install. It installs the app under the user data directory, creates a `bevy_open_siege` launcher in `~/.local/bin` or `$XDG_BIN_HOME`, and installs desktop/AppStream metadata. `./uninstall_linux_user.sh` removes the app and launcher while preserving save data; use `./uninstall_linux_user.sh --purge` to remove saves too.
 
