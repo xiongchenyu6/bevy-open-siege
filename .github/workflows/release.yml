@@ -137,17 +137,22 @@ jobs:
           sudo apt-get install -y \
             g++ \
             imagemagick \
+            libgl1-mesa-dri \
             libasound2-dev \
             libudev-dev \
             libwayland-dev \
             libx11-dev \
             libxkbcommon-dev \
             libxkbcommon-x11-0 \
+            mesa-vulkan-drivers \
             patchelf \
             pkg-config \
             xvfb
 
       - name: Build and package Linux release artifact
+        env:
+          WGPU_BACKEND: vulkan
+          WGPU_FORCE_FALLBACK_ADAPTER: "1"
         run: |
           chmod +x scripts/package_release.sh
           xvfb-run -a scripts/package_release.sh

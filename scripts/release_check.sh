@@ -105,7 +105,7 @@ grep -q "cargo build --locked --release --target" "$ROOT/scripts/package_windows
 grep -q "Compress-Archive" "$ROOT/scripts/package_windows.ps1"
 grep -q 'qa_signoff_prepare.sh' "$ROOT/scripts/package_windows.ps1"
 grep -q 'cargo build --locked --release --target "$X86_TARGET"' "$ROOT/scripts/package_macos.sh"
-grep -q 'lipo -verify_arch x86_64 arm64' "$ROOT/scripts/package_macos.sh"
+grep -q 'lipo "$RELEASE_BINARY" -verify_arch x86_64 arm64' "$ROOT/scripts/package_macos.sh"
 grep -q 'qa_signoff_prepare.sh' "$ROOT/scripts/package_macos.sh"
 grep -q 'verify_platform_archive.sh' "$ROOT/.github/workflows/release.yml"
 grep -q 'shasum -a 256 "${PACKAGE}.tar.gz"' "$ROOT/.github/workflows/release.yml"

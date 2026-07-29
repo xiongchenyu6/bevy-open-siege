@@ -32,7 +32,7 @@ mkdir -p "$DIST/assets"
 lipo -create "$X86_BINARY" "$ARM_BINARY" -output "$DIST/bevy_open_siege"
 chmod +x "$DIST/bevy_open_siege"
 RELEASE_BINARY="$DIST/bevy_open_siege"
-lipo -verify_arch x86_64 arm64 "$RELEASE_BINARY"
+lipo "$RELEASE_BINARY" -verify_arch x86_64 arm64
 
 "$RELEASE_BINARY" --validate-data
 "$RELEASE_BINARY" --audit-balance > "$ROOT/dist/balance-audit.txt"
