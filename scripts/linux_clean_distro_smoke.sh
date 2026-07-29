@@ -33,12 +33,12 @@ for file in bevy_open_siege bevy_open_siege.bin lib/ld-linux-x86-64.so.2; do
 done
 
 ENGINE=""
-if command -v podman >/dev/null 2>&1; then
-  ENGINE="podman"
-elif command -v docker >/dev/null 2>&1; then
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   ENGINE="docker"
+elif command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+  ENGINE="podman"
 else
-  echo "linux clean distro smoke requires podman or docker" >&2
+  echo "linux clean distro smoke requires a working Docker or Podman engine" >&2
   exit 1
 fi
 
@@ -50,8 +50,22 @@ cat > "$TMPDIR_ROOT/check.sh" <<'EOF'
 #!/bin/sh
 set -eu
 cd /pkg
-./bevy_open_siege --validate-data > /tmp/validate-data.txt
-lib/ld-linux-x86-64.so.2 --library-path lib --list ./bevy_open_siege.bin > /tmp/ld-list.txt
+if ./bevy_open_siege --validate-data > /tmp/validate-data.txt 2>&1; then
+  printf '%s\n' "validate_data: pass"
+else
+  status=$?
+  cat /tmp/validate-data.txt >&2
+  printf '%s\n' "validate_data: failed with status $status" >&2
+  exit "$status"
+fi
+if lib/ld-linux-x86-64.so.2 --library-path lib --list ./bevy_open_siege.bin > /tmp/ld-list.txt 2>&1; then
+  printf '%s\n' "dependency_resolution: pass"
+else
+  status=$?
+  cat /tmp/ld-list.txt >&2
+  printf '%s\n' "dependency_resolution: failed with status $status" >&2
+  exit "$status"
+fi
 if grep -q "not found" /tmp/ld-list.txt; then
   cat /tmp/ld-list.txt >&2
   exit 1
@@ -60,8 +74,6 @@ if grep -q "/nix/store" bevy_open_siege; then
   echo "entrypoint references /nix/store" >&2
   exit 1
 fi
-printf '%s\n' "validate_data: pass"
-printf '%s\n' "dependency_resolution: pass"
 printf '%s\n' "missing_dependencies: none"
 printf '%s\n' "entrypoint_nix_store_references: no"
 printf '%s\n' "window_smoke: not_run_in_container"
@@ -69,12 +81,20 @@ printf '%s\n' "audio_smoke: not_run_in_container"
 EOF
 chmod +x "$TMPDIR_ROOT/check.sh"
 
+set +e
 RUN_OUTPUT="$(
   "$ENGINE" run --rm --network none \
     -v "$PACKAGE_ABS:/pkg:ro" \
     -v "$TMPDIR_ROOT/check.sh:/check.sh:ro" \
-    "$IMAGE" /check.sh
+    "$IMAGE" /check.sh 2>&1
 )"
+RUN_STATUS=$?
+set -e
+if [[ "$RUN_STATUS" -ne 0 ]]; then
+  echo "linux clean distro smoke container execution failed with status $RUN_STATUS using $ENGINE" >&2
+  printf '%s\n' "$RUN_OUTPUT" >&2
+  exit 1
+fi
 
 cat <<EOF
 linux clean distro smoke ok

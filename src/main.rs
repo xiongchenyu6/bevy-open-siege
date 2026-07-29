@@ -9673,6 +9673,8 @@ mod tests {
         assert!(linux_clean_distro_smoke_script.contains("linux clean distro smoke ok"));
         assert!(linux_clean_distro_smoke_script.contains("docker.io/library/ubuntu:24.04"));
         assert!(linux_clean_distro_smoke_script.contains("--network none"));
+        assert!(linux_clean_distro_smoke_script.contains("docker info"));
+        assert!(linux_clean_distro_smoke_script.contains("container execution failed with status"));
         assert!(linux_clean_distro_smoke_script.contains("validate_data: pass"));
         assert!(linux_clean_distro_smoke_script.contains("dependency_resolution: pass"));
         assert!(linux_clean_distro_smoke_script.contains("manual_clean_machine_qa"));
