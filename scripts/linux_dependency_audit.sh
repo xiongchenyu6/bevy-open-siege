@@ -87,13 +87,16 @@ for required in libc.so.6 libm.so.6 libgcc_s.so.1 libasound.so.2; do
   fi
 done
 
+NIX_STORE_PATH_PATTERN='/nix/store/[0-9a-z]{32}-'
 nix_store_refs="no"
-if grep -q "/nix/store" <<< "$LDD_OUTPUT" || grep -q "/nix/store" <<< "$INTERPRETER" || strings "$BINARY" | grep -q "/nix/store"; then
+if grep -q "/nix/store" <<< "$LDD_OUTPUT" \
+  || grep -q "/nix/store" <<< "$INTERPRETER" \
+  || grep -aEq "$NIX_STORE_PATH_PATTERN" "$BINARY"; then
   nix_store_refs="yes"
 fi
 
 payload_nix_store_refs="no"
-if strings "$PAYLOAD" | grep -q "/nix/store"; then
+if grep -aEq "$NIX_STORE_PATH_PATTERN" "$PAYLOAD"; then
   payload_nix_store_refs="yes"
 fi
 

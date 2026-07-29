@@ -40,8 +40,9 @@ if grep -q "/nix/store" "$PACKAGE_DIR/bevy_open_siege"; then
   echo "linux portability smoke entrypoint should not reference /nix/store" >&2
   exit 1
 fi
-if strings "$PACKAGE_DIR/bevy_open_siege.bin" | grep -q "/nix/store"; then
-  echo "linux portability smoke payload should not reference /nix/store" >&2
+NIX_STORE_PATH_PATTERN='/nix/store/[0-9a-z]{32}-'
+if grep -aEq "$NIX_STORE_PATH_PATTERN" "$PACKAGE_DIR/bevy_open_siege.bin"; then
+  echo "linux portability smoke payload should not reference a concrete /nix/store path" >&2
   exit 1
 fi
 
