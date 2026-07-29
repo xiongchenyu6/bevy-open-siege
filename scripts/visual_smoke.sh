@@ -29,12 +29,20 @@ if [[ "${WINIT_UNIX_BACKEND:-}" == "wayland" && -n "${WAYLAND_DISPLAY:-}" ]]; th
   CAPTURE_BACKEND="wayland"
 fi
 if [[ "$CAPTURE_BACKEND" == "wayland" ]]; then
-  if ! command -v grim >/dev/null 2>&1 || ! command -v magick >/dev/null 2>&1; then
-    echo "visual smoke requires grim and magick commands for Wayland screenshot capture" >&2
+  if ! command -v grim >/dev/null 2>&1; then
+    echo "visual smoke requires grim for Wayland screenshot capture" >&2
     exit 1
   fi
-elif ! command -v import >/dev/null 2>&1 || ! command -v magick >/dev/null 2>&1; then
-  echo "visual smoke requires ImageMagick import and magick commands for X11 screenshot capture" >&2
+elif ! command -v import >/dev/null 2>&1; then
+  echo "visual smoke requires ImageMagick import for X11 screenshot capture" >&2
+  exit 1
+fi
+if command -v magick >/dev/null 2>&1; then
+  IMAGE_PROCESSOR=(magick)
+elif command -v convert >/dev/null 2>&1; then
+  IMAGE_PROCESSOR=(convert)
+else
+  echo "visual smoke requires ImageMagick magick or convert for screenshot analysis" >&2
   exit 1
 fi
 
@@ -89,7 +97,7 @@ if [[ ! -s "$SCREENSHOT_FILE" ]]; then
   exit 1
 fi
 
-stddev="$(magick "$SCREENSHOT_FILE" -colorspace Gray -format '%[fx:standard_deviation]' info:)"
+stddev="$("${IMAGE_PROCESSOR[@]}" "$SCREENSHOT_FILE" -colorspace Gray -format '%[fx:standard_deviation]' info:)"
 if ! awk -v value="$stddev" 'BEGIN { exit !(value > 0.005) }'; then
   echo "visual smoke failed: screenshot appears blank or nearly solid" >&2
   echo "screenshot_stddev: $stddev" >&2
@@ -103,6 +111,7 @@ audio: disabled
 window: created
 screenshot: nonblank
 capture_backend: ${CAPTURE_BACKEND}
+image_processor: ${IMAGE_PROCESSOR[0]}
 panic_scan: clean
 exit_status: killed_after_capture
 EOF
