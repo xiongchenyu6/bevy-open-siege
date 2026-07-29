@@ -69,31 +69,15 @@ done
 
 env "${ENV_ARGS[@]}" "$PACKAGE_DIR/bevy_open_siege" --validate-data >/dev/null
 
-set +e
-timeout "${DURATION_SECONDS}s" env "${ENV_ARGS[@]}" "$PACKAGE_DIR/bevy_open_siege" --no-audio > "$LOG_FILE" 2>&1
-STATUS=$?
-set -e
-
-if [[ "$STATUS" -eq 0 ]]; then
-  echo "linux portability smoke failed: game exited before ${DURATION_SECONDS}s" >&2
+if ! env "${ENV_ARGS[@]}" "$PACKAGE_DIR/runtime_smoke.sh" \
+  "$PACKAGE_DIR/bevy_open_siege" "$DURATION_SECONDS" > "$LOG_FILE"; then
+  echo "linux portability smoke failed: sanitized runtime smoke failed" >&2
   cat "$LOG_FILE" >&2
   exit 1
 fi
-if [[ "$STATUS" -ne 124 ]]; then
-  echo "linux portability smoke failed: game exited with status $STATUS" >&2
-  cat "$LOG_FILE" >&2
-  exit 1
-fi
-if grep -Eiq 'panicked at|Encountered a panic|thread .* panicked|error\[B0001\]' "$LOG_FILE"; then
-  echo "linux portability smoke failed: panic signature found" >&2
-  cat "$LOG_FILE" >&2
-  exit 1
-fi
-if ! grep -q "Creating new window Bevy Open Siege" "$LOG_FILE"; then
-  echo "linux portability smoke failed: window creation log not found" >&2
-  cat "$LOG_FILE" >&2
-  exit 1
-fi
+grep -q "runtime startup smoke ok" "$LOG_FILE"
+grep -q "window: created" "$LOG_FILE"
+grep -q "panic_scan: clean" "$LOG_FILE"
 
 cat <<EOF
 linux portability smoke ok
@@ -104,6 +88,7 @@ sanitized_env: LD_LIBRARY_PATH unset, Nix variables omitted
 path: ${SANITIZED_PATH}
 window: created
 panic_scan: clean
-exit_status: timeout_after_duration
+startup_policy: 30s window deadline plus post-window stability
+exit_status: delegated_runtime_smoke
 clean_distro_qa: still required
 EOF

@@ -9932,6 +9932,9 @@ mod tests {
         assert!(runtime_smoke_script.contains("Creating new window Bevy Open Siege"));
         assert!(runtime_smoke_script.contains("error\\[B0001\\]"));
         assert!(runtime_smoke_script.contains("--no-audio"));
+        assert!(runtime_smoke_script.contains("STARTUP_TIMEOUT_SECONDS"));
+        assert!(runtime_smoke_script.contains("POST_WINDOW_STABILITY_SECONDS"));
+        assert!(runtime_smoke_script.contains("killed_after_stability_window"));
         assert!(visual_smoke_script.contains("visual startup smoke ok"));
         assert!(visual_smoke_script.contains("import -window root"));
         assert!(visual_smoke_script.contains("X11 screenshot capture failed or timed out"));
