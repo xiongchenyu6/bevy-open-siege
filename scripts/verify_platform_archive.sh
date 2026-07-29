@@ -168,6 +168,8 @@ jq -e \
 listed_files="$TMP_DIR/listed-files.txt"
 actual_files="$TMP_DIR/actual-files.txt"
 while IFS= read -r checksum_line || [[ -n "$checksum_line" ]]; do
+  # PowerShell writes the Windows manifest with CRLF line endings.
+  checksum_line="${checksum_line%$'\r'}"
   checksum="${checksum_line:0:64}"
   separator="${checksum_line:64:2}"
   relative_path="${checksum_line:66}"

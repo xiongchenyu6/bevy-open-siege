@@ -9118,6 +9118,7 @@ mod tests {
         let store_submission_script = include_str!("../scripts/create_store_submission_pack.sh");
         let windows_package_script = include_str!("../scripts/package_windows.ps1");
         let macos_package_script = include_str!("../scripts/package_macos.sh");
+        let verify_platform_archive_script = include_str!("../scripts/verify_platform_archive.sh");
         let license_report_script = include_str!("../scripts/generate_third_party_licenses.py");
         let release_manifest_script = include_str!("../scripts/generate_release_manifest.py");
 
@@ -9464,6 +9465,8 @@ mod tests {
         assert!(release_check_script.contains("package_macos.sh"));
         assert!(release_check_script.contains("generate_release_manifest.py"));
         assert!(release_check_script.contains("py_compile"));
+        assert!(verify_platform_archive_script.contains("checksum_line%$'\\r'"));
+        assert!(verify_platform_archive_script.contains("sha256sum -c SHA256SUMS"));
         assert!(package_script.contains("BEVY_OPEN_SIEGE_USE_NIX"));
         assert!(package_script.contains("install_linux_user.sh"));
         assert!(package_script.contains("uninstall_linux_user.sh"));
