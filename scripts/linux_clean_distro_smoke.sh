@@ -96,12 +96,30 @@ if [[ "$RUN_STATUS" -ne 0 ]]; then
   exit 1
 fi
 
+EXPECTED_RESULTS=(
+  "validate_data: pass"
+  "dependency_resolution: pass"
+  "missing_dependencies: none"
+  "entrypoint_nix_store_references: no"
+  "window_smoke: not_run_in_container"
+  "audio_smoke: not_run_in_container"
+)
+CHECK_OUTPUT=""
+for expected in "${EXPECTED_RESULTS[@]}"; do
+  if ! grep -Fxq "$expected" <<< "$RUN_OUTPUT"; then
+    echo "linux clean distro smoke missing result: $expected" >&2
+    printf '%s\n' "$RUN_OUTPUT" >&2
+    exit 1
+  fi
+  CHECK_OUTPUT+="${CHECK_OUTPUT:+$'\n'}$expected"
+done
+
 cat <<EOF
 linux clean distro smoke ok
 engine: $ENGINE
 container_image: $IMAGE
 package: $(basename "$PACKAGE_ABS")
-$RUN_OUTPUT
+$CHECK_OUTPUT
 clean_distro_scope: validate-data and bundled dependency resolution
 manual_clean_machine_qa: still required for window, GPU, audio, install, and input review
 EOF
