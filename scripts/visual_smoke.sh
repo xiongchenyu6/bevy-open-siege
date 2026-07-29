@@ -48,13 +48,23 @@ fi
 
 LOG_FILE="$(mktemp)"
 SCREENSHOT_FILE="$(mktemp --suffix=.png)"
+CAPTURE_ERROR_FILE="$(mktemp)"
 PID=""
 cleanup() {
   if [[ -n "$PID" ]] && kill -0 "$PID" >/dev/null 2>&1; then
     kill "$PID" >/dev/null 2>&1 || true
+    for _ in {1..20}; do
+      if ! kill -0 "$PID" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 0.1
+    done
+    if kill -0 "$PID" >/dev/null 2>&1; then
+      kill -KILL "$PID" >/dev/null 2>&1 || true
+    fi
     wait "$PID" >/dev/null 2>&1 || true
   fi
-  rm -f "$LOG_FILE" "$SCREENSHOT_FILE"
+  rm -f "$LOG_FILE" "$SCREENSHOT_FILE" "$CAPTURE_ERROR_FILE"
 }
 trap cleanup EXIT
 
@@ -82,9 +92,19 @@ fi
 
 sleep 1
 if [[ "$CAPTURE_BACKEND" == "wayland" ]]; then
-  grim "$SCREENSHOT_FILE"
+  if ! timeout 5s grim "$SCREENSHOT_FILE" 2> "$CAPTURE_ERROR_FILE"; then
+    echo "visual smoke failed: Wayland screenshot capture failed or timed out" >&2
+    cat "$CAPTURE_ERROR_FILE" >&2
+    exit 1
+  fi
 else
-  import -window "Bevy Open Siege" "$SCREENSHOT_FILE"
+  # Capturing the X11 root avoids ImageMagick's unreliable title lookup on
+  # headless Xvfb servers while still recording the visible game window.
+  if ! timeout 5s import -window root "$SCREENSHOT_FILE" 2> "$CAPTURE_ERROR_FILE"; then
+    echo "visual smoke failed: X11 screenshot capture failed or timed out" >&2
+    cat "$CAPTURE_ERROR_FILE" >&2
+    exit 1
+  fi
 fi
 
 if grep -Eiq 'panicked at|Encountered a panic|thread .* panicked|error\[B0001\]' "$LOG_FILE"; then
@@ -111,6 +131,7 @@ audio: disabled
 window: created
 screenshot: nonblank
 capture_backend: ${CAPTURE_BACKEND}
+capture_target: $([[ "$CAPTURE_BACKEND" == "wayland" ]] && printf 'output' || printf 'root')
 image_processor: ${IMAGE_PROCESSOR[0]}
 panic_scan: clean
 exit_status: killed_after_capture

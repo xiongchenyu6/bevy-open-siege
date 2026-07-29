@@ -1,5 +1,19 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+
+PACKAGE_STAGE="initialization"
+report_stage() {
+  PACKAGE_STAGE="$1"
+  printf 'package stage: %s\n' "$PACKAGE_STAGE"
+}
+report_failure() {
+  local status="$1"
+  local line="$2"
+  printf 'package_release.sh failed during stage %q at line %s with status %s\n' \
+    "$PACKAGE_STAGE" "$line" "$status" >&2
+  return "$status"
+}
+trap 'report_failure "$?" "$LINENO"' ERR
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -17,6 +31,7 @@ fi
 BUILD_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 
 if [[ "$USE_NIX" == "1" ]]; then
+  report_stage "compile release binary with Nix"
   BUILD_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/bevy_open_siege_package_target}"
   rm -rf "$ROOT/target"
   nix develop "path:$ROOT" --command env CARGO_TARGET_DIR="$BUILD_TARGET_DIR" cargo build --locked --release
@@ -28,11 +43,14 @@ if [[ "$USE_NIX" == "1" ]]; then
   source "$NIX_ENV_FILE"
   rm -f "$NIX_ENV_FILE"
 else
+  report_stage "compile release binary"
   cargo build --locked --release
 fi
 RELEASE_BINARY="$BUILD_TARGET_DIR/release/bevy_open_siege"
 mkdir -p "$ROOT/dist"
+report_stage "validate embedded release data"
 "$RELEASE_BINARY" --validate-data
+report_stage "generate embedded release audits"
 "$RELEASE_BINARY" --audit-balance > "$ROOT/dist/balance-audit.txt"
 "$RELEASE_BINARY" --audit-assets > "$ROOT/dist/asset-audit.txt"
 "$RELEASE_BINARY" --audit-audio > "$ROOT/dist/audio-audit.txt"
@@ -52,11 +70,16 @@ mkdir -p "$ROOT/dist"
 "$RELEASE_BINARY" --simulate-campaign > "$ROOT/dist/campaign-simulation.txt"
 "$RELEASE_BINARY" --release-readiness > "$ROOT/dist/release-readiness.txt"
 "$RELEASE_BINARY" --print-release-info > "$ROOT/dist/release-info.txt"
+report_stage "run source runtime smoke"
 "$ROOT/scripts/runtime_smoke.sh" "$RELEASE_BINARY" 12 > "$ROOT/dist/runtime-smoke.txt"
+report_stage "run source visual smoke"
 "$ROOT/scripts/visual_smoke.sh" "$RELEASE_BINARY" 15 > "$ROOT/dist/visual-smoke.txt"
+report_stage "run source audio smoke"
 "$ROOT/scripts/audio_smoke.sh" "$RELEASE_BINARY" 12 > "$ROOT/dist/audio-smoke.txt"
+report_stage "generate third-party licenses"
 python3 "$ROOT/scripts/generate_third_party_licenses.py" > "$ROOT/dist/THIRD_PARTY_LICENSES.md"
 
+report_stage "assemble portable Linux package"
 rm -rf "$DIST"
 mkdir -p "$DIST/assets" "$DIST/lib"
 cp "$RELEASE_BINARY" "$DIST/bevy_open_siege.bin"
@@ -247,11 +270,17 @@ cp -R "$ROOT/assets/i18n" "$DIST/assets/"
 cp -R "$ROOT/assets/linux" "$DIST/assets/"
 cp -R "$ROOT/assets/models" "$DIST/assets/"
 
+report_stage "audit assembled Linux package"
 "$ROOT/scripts/linux_package_audit.sh" "$DIST" > "$DIST/linux-package-audit.txt"
+report_stage "run installed Linux runtime and visual smoke"
 "$ROOT/scripts/linux_install_smoke.sh" "$DIST" 12 15 > "$DIST/linux-install-smoke.txt"
+report_stage "audit bundled Linux dependencies"
 "$ROOT/scripts/linux_dependency_audit.sh" "$DIST" > "$DIST/linux-dependency-audit.txt"
+report_stage "run Linux portability smoke"
 "$ROOT/scripts/linux_portability_smoke.sh" "$DIST" 12 > "$DIST/linux-portability-smoke.txt"
+report_stage "run clean Ubuntu container smoke"
 "$ROOT/scripts/linux_clean_distro_smoke.sh" "$DIST" > "$DIST/linux-clean-distro-smoke.txt"
+report_stage "audit Linux metadata and store assets"
 "$ROOT/scripts/linux_metadata_audit.sh" "$DIST" > "$DIST/linux-metadata-audit.txt"
 "$ROOT/scripts/store_asset_audit.sh" "$DIST" > "$DIST/store-asset-audit.txt"
 "$ROOT/scripts/content_rating_audit.sh" "$DIST" > "$DIST/content-rating-audit.txt"
@@ -260,6 +289,7 @@ cp -R "$ROOT/assets/models" "$DIST/assets/"
 "$ROOT/scripts/final_signoff_check.sh" --plan "$DIST" > "$DIST/final-signoff-plan.txt"
 python3 "$ROOT/scripts/generate_release_manifest.py" "$DIST" "linux-x86_64" > "$DIST/release-manifest.json"
 
+report_stage "generate package checksums"
 MANIFEST_TMP="$(mktemp)"
 trap 'rm -f "$MANIFEST_TMP"' EXIT
 (
@@ -272,6 +302,7 @@ trap 'rm -f "$MANIFEST_TMP"' EXIT
 mv "$MANIFEST_TMP" "$DIST/SHA256SUMS"
 trap - EXIT
 
+report_stage "archive and verify Linux package"
 tar -C "$ROOT/dist" -czf "$ROOT/dist/${PACKAGE}.tar.gz" "$PACKAGE"
 "$ROOT/scripts/smoke_release_archive.sh" "$ROOT/dist/${PACKAGE}.tar.gz"
 echo "Created dist/${PACKAGE}.tar.gz"

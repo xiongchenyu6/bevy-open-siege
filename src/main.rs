@@ -9921,7 +9921,10 @@ mod tests {
         assert!(runtime_smoke_script.contains("error\\[B0001\\]"));
         assert!(runtime_smoke_script.contains("--no-audio"));
         assert!(visual_smoke_script.contains("visual startup smoke ok"));
-        assert!(visual_smoke_script.contains("import -window \"Bevy Open Siege\""));
+        assert!(visual_smoke_script.contains("import -window root"));
+        assert!(visual_smoke_script.contains("X11 screenshot capture failed or timed out"));
+        assert!(visual_smoke_script.contains("kill -KILL"));
+        assert!(visual_smoke_script.contains("capture_target:"));
         assert!(visual_smoke_script.contains("screenshot: nonblank"));
         assert!(visual_smoke_script.contains("standard_deviation"));
         assert!(visual_smoke_script.contains("error\\[B0001\\]"));
