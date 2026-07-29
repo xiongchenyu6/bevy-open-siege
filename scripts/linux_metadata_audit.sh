@@ -68,6 +68,10 @@ grep -q '<category>StrategyGame</category>' "$metainfo_file"
 grep -q "<release version=\"$package_version\"" "$metainfo_file"
 grep -q "10-level campaign" "$metainfo_file"
 grep -q "bilingual English and Chinese localization" "$metainfo_file"
+grep -q '<developer id="io.github.xiongchenyu6">' "$metainfo_file"
+grep -q '<url type="homepage">https://github.com/xiongchenyu6/bevy-open-siege</url>' "$metainfo_file"
+grep -q '<content_rating type="oars-1.1">' "$metainfo_file"
+grep -q '<content_attribute id="violence-fantasy">mild</content_attribute>' "$metainfo_file"
 
 if command -v file >/dev/null 2>&1; then
   file "$icon_file" | grep -q "PNG image data" || {
@@ -78,16 +82,28 @@ fi
 
 desktop_validator="not installed"
 if command -v desktop-file-validate >/dev/null 2>&1; then
-  desktop-file-validate "$desktop_file"
+  if ! validator_output="$(desktop-file-validate "$desktop_file" 2>&1)"; then
+    echo "linux metadata audit desktop-file-validate failed" >&2
+    printf '%s\n' "$validator_output" >&2
+    exit 1
+  fi
   desktop_validator="passed"
 fi
 
 appstream_validator="not installed"
 if command -v appstreamcli >/dev/null 2>&1; then
-  appstreamcli validate --no-net "$metainfo_file" >/dev/null
+  if ! validator_output="$(appstreamcli validate --no-net "$metainfo_file" 2>&1)"; then
+    echo "linux metadata audit appstreamcli validation failed" >&2
+    printf '%s\n' "$validator_output" >&2
+    exit 1
+  fi
   appstream_validator="passed"
 elif command -v appstream-util >/dev/null 2>&1; then
-  appstream-util validate-relax "$metainfo_file" >/dev/null
+  if ! validator_output="$(appstream-util validate-relax "$metainfo_file" 2>&1)"; then
+    echo "linux metadata audit appstream-util validation failed" >&2
+    printf '%s\n' "$validator_output" >&2
+    exit 1
+  fi
   appstream_validator="passed"
 fi
 

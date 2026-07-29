@@ -5,6 +5,11 @@
   <project_license>MIT</project_license>
   <name>Bevy Open Siege</name>
   <summary>Lane-defense strategy with plant tactics and escalating undead waves</summary>
+  <developer id="io.github.xiongchenyu6">
+    <name>xiongchenyu6</name>
+  </developer>
+  <url type="homepage">https://github.com/xiongchenyu6/bevy-open-siege</url>
+  <url type="bugtracker">https://github.com/xiongchenyu6/bevy-open-siege/issues</url>
   <description>
     <p>Bevy Open Siege is a single-player lane-defense strategy game about holding the last greenhouse line with specialized plants, sun economy, and a 10-level campaign.</p>
     <p>The release-candidate package includes bilingual English and Chinese localization, production PNG art, synthesized music and sound effects, persistent progress, and keyboard and mouse controls.</p>
@@ -17,7 +22,10 @@
     <category>Game</category>
     <category>StrategyGame</category>
   </categories>
+  <content_rating type="oars-1.1">
+    <content_attribute id="violence-fantasy">mild</content_attribute>
+  </content_rating>
   <releases>
-    <release version="0.1.0" date="2026-06-19" />
+    <release version="0.1.0" date="2026-07-29" />
   </releases>
 </component>

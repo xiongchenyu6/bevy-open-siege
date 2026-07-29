@@ -2512,6 +2512,18 @@ fn validate_release_data() -> Result<ReleaseMetadata, String> {
         }
         None => return Err("AppStream metadata is missing a release version".to_string()),
     }
+    for required_token in [
+        "<developer id=\"io.github.xiongchenyu6\">",
+        "<url type=\"homepage\">https://github.com/xiongchenyu6/bevy-open-siege</url>",
+        "<content_rating type=\"oars-1.1\">",
+        "<content_attribute id=\"violence-fantasy\">mild</content_attribute>",
+    ] {
+        if !LINUX_APPSTREAM_METAINFO.contains(required_token) {
+            return Err(format!(
+                "AppStream metadata is missing release token: {required_token}"
+            ));
+        }
+    }
     for required_language in ["en", "zh"] {
         if !metadata
             .supported_languages
@@ -8771,7 +8783,7 @@ mod tests {
         assert!(report.contains("sun pickup budget: 47"));
         assert!(report.contains("visual effect budget: 45"));
         assert!(report.contains("estimated dynamic entities: 275/320"));
-        assert!(report.contains("embedded asset bytes: 17035445/25000000"));
+        assert!(report.contains("embedded asset bytes: 17035820/25000000"));
         assert!(report.contains("checked viewport floor: compact-540p 960x540"));
         assert!(report.contains("manual performance QA still required"));
     }
@@ -9999,6 +10011,8 @@ mod tests {
         assert!(LINUX_DESKTOP_ENTRY.contains("Exec=bevy_open_siege"));
         assert!(LINUX_DESKTOP_ENTRY.contains("Icon=bevy-open-siege"));
         assert!(LINUX_APPSTREAM_METAINFO.contains("io.github.bevy_open_siege.BevyOpenSiege"));
+        assert!(LINUX_APPSTREAM_METAINFO.contains("<developer id=\"io.github.xiongchenyu6\">"));
+        assert!(LINUX_APPSTREAM_METAINFO.contains("<content_rating type=\"oars-1.1\">"));
         assert_eq!(
             appstream_release_version(LINUX_APPSTREAM_METAINFO),
             Some(metadata.version.as_str())
