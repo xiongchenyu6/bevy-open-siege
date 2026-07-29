@@ -9112,6 +9112,7 @@ mod tests {
         let qa_evidence_summary_script = include_str!("../scripts/qa_evidence_summary.sh");
         let final_signoff_check_script = include_str!("../scripts/final_signoff_check.sh");
         let verify_release_script = include_str!("../scripts/verify_release.sh");
+        let verify_github_release_script = include_str!("../scripts/verify_github_release.sh");
         let support_diagnostics_script = include_str!("../scripts/support_diagnostics.sh");
         let signoff_bundle_script = include_str!("../scripts/signoff_bundle.sh");
         let candidate_evidence_script = include_str!("../scripts/create_candidate_evidence.sh");
@@ -9467,6 +9468,8 @@ mod tests {
         assert!(release_check_script.contains("py_compile"));
         assert!(verify_platform_archive_script.contains("checksum_line%$'\\r'"));
         assert!(verify_platform_archive_script.contains("sha256sum -c SHA256SUMS"));
+        assert!(verify_github_release_script.contains("checksum_lines[0]%$'\\r'"));
+        assert!(verify_github_release_script.contains("sha256sum -c \"$checksum_name\""));
         assert!(package_script.contains("BEVY_OPEN_SIEGE_USE_NIX"));
         assert!(package_script.contains("install_linux_user.sh"));
         assert!(package_script.contains("uninstall_linux_user.sh"));

@@ -161,7 +161,7 @@ for checksum_path in "${checksums[@]}"; do
   mapfile -t checksum_lines < "$checksum_path"
   [[ ${#checksum_lines[@]} -eq 1 ]] \
     || fail "$checksum_name must contain exactly one checksum line"
-  checksum_line="${checksum_lines[0]}"
+  checksum_line="${checksum_lines[0]%$'\r'}"
   [[ "${checksum_line:0:64}" =~ ^[0-9a-f]{64}$ ]] \
     || fail "$checksum_name contains an invalid SHA256 digest"
   [[ "${checksum_line:64:2}" == "  " && "${checksum_line:66}" == "$archive_name" ]] \
