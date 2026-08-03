@@ -145,6 +145,8 @@ required_files=(
   "assets/art/ui/menu-panel.png"
   "assets/art/ui/hud-panel.png"
   "assets/art/ui/end-panel.png"
+  "assets/art/ui/menu-background.png"
+  "assets/art/ui/hud-overlay.png"
   "assets/models/plants/sprout-slinger.glb"
   "assets/models/plants/sunbloom.glb"
   "assets/models/plants/bark-bulwark.glb"
@@ -251,10 +253,10 @@ grep -q "balance audit ok" "$TMPDIR/balance-audit.actual.txt"
 "$PACKAGE_DIR/bevy_open_siege" --audit-assets > "$TMPDIR/asset-audit.actual.txt"
 diff -u "$PACKAGE_DIR/asset-audit.txt" "$TMPDIR/asset-audit.actual.txt"
 grep -q "asset audit ok" "$TMPDIR/asset-audit.actual.txt"
-grep -q "png assets: 36" "$TMPDIR/asset-audit.actual.txt"
+grep -q "png assets: 38" "$TMPDIR/asset-audit.actual.txt"
 grep -q "wav assets: 7" "$TMPDIR/asset-audit.actual.txt"
 grep -q "glb assets: 20" "$TMPDIR/asset-audit.actual.txt"
-grep -q "production art assets: 56" "$TMPDIR/asset-audit.actual.txt"
+grep -q "production art assets: 58" "$TMPDIR/asset-audit.actual.txt"
 "$PACKAGE_DIR/bevy_open_siege" --audit-audio > "$TMPDIR/audio-audit.actual.txt"
 diff -u "$PACKAGE_DIR/audio-audit.txt" "$TMPDIR/audio-audit.actual.txt"
 grep -q "audio audit ok" "$TMPDIR/audio-audit.actual.txt"
@@ -264,7 +266,7 @@ grep -q "checked startup policy: audio remains opt-in by default" "$TMPDIR/audio
 "$PACKAGE_DIR/bevy_open_siege" --audit-controls > "$TMPDIR/controls-audit.actual.txt"
 diff -u "$PACKAGE_DIR/controls-audit.txt" "$TMPDIR/controls-audit.actual.txt"
 grep -q "control audit ok: 24 bindings" "$TMPDIR/controls-audit.actual.txt"
-grep -q "Mouse left | gameplay | move cursor and plant selected seed" "$TMPDIR/controls-audit.actual.txt"
+grep -q "Mouse left | menu/gameplay | activate UI, collect sun, and use the active lawn tool" "$TMPDIR/controls-audit.actual.txt"
 grep -q "menu localization: en/zh menu_help covered" "$TMPDIR/controls-audit.actual.txt"
 "$PACKAGE_DIR/bevy_open_siege" --audit-input-flow > "$TMPDIR/input-flow-audit.actual.txt"
 diff -u "$PACKAGE_DIR/input-flow-audit.txt" "$TMPDIR/input-flow-audit.actual.txt"
@@ -622,8 +624,8 @@ if [[ "$environment_texture_count" -ne 3 ]]; then
   echo "release archive must include 3 environment textures, found $environment_texture_count" >&2
   exit 1
 fi
-if [[ "$ui_chrome_count" -ne 3 ]]; then
-  echo "release archive must include 3 UI chrome textures, found $ui_chrome_count" >&2
+if [[ "$ui_chrome_count" -ne 5 ]]; then
+  echo "release archive must include 5 UI chrome textures, found $ui_chrome_count" >&2
   exit 1
 fi
 if [[ "$audio_count" -ne 7 ]]; then

@@ -1,6 +1,6 @@
 (
   title: "Bevy Open Siege",
-  menu_help: "Click or Tab/arrows to choose | 1-0 level | Enter start | F fullscreen | +/- volume | L language",
+  menu_help: "Click mission/settings | Click seed, lawn, sun | Keys: Tab/arrows, 1-0, Enter, F, +/-, L",
   menu_start: "Click here or press Enter to defend the greenhouse",
   game_over: "Greenhouse breached",
   victory: "Bevy Open Siege cleared",
@@ -22,7 +22,7 @@
     wave: "Wave",
     score: "Score",
     cursor: "Cursor",
-    collect_sun: "C collect sun",
+    collect_sun: "Click sun / C magnet",
     language: "L language",
     level: "Level",
   ),
@@ -51,9 +51,9 @@
     "redirects attackers",
   ],
   hints: [
-    "Plant a Sunbloom first (press 2, then Space or click a tile) - sun fuels everything",
-    "Press C to gather every floating sun orb",
-    "Plant a Sprout Slinger (press 1) near the left to shoot walkers",
+    "Click Sunbloom, then click an open lawn tile - sun fuels everything",
+    "Click a floating sun orb to collect it",
+    "Click Sprout Slinger, then click a tile near the left side",
     "Watch the wave bar up top - survive the final wave to win!",
   ],
   zombie_labels: [

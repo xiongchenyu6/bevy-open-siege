@@ -3,8 +3,8 @@ use bevy::window::{
 };
 use bevy::{
     gltf::{
-        GltfAssetLabel, GltfExtras, GltfMaterialExtras, GltfMaterialName, GltfMeshExtras,
-        GltfMeshName, GltfSceneExtras,
+        GltfExtras, GltfMaterialExtras, GltfMaterialName, GltfMeshExtras, GltfMeshName,
+        GltfSceneExtras,
     },
     prelude::*,
 };
@@ -31,6 +31,8 @@ const BOARD_LEFT: f32 = -5.4;
 const BOARD_TOP: f32 = 3.0;
 const ZOMBIE_START_X: f32 = 7.3;
 const HOME_X: f32 = -6.4;
+const SUN_POINTER_RADIUS: f32 = 42.0;
+const UNIT_BILLBOARD_TILT: f32 = -0.68;
 const SAVE_FILE_NAME: &str = "bevy_open_siege_save.ron";
 
 // Binary assets are embedded for desktop packaging/audits only; on web they are
@@ -97,6 +99,8 @@ const ENV_SOIL_BORDER_PNG: &[u8] = embedded_bytes!("../assets/art/environment/so
 const UI_MENU_PANEL_PNG: &[u8] = embedded_bytes!("../assets/art/ui/menu-panel.png");
 const UI_HUD_PANEL_PNG: &[u8] = embedded_bytes!("../assets/art/ui/hud-panel.png");
 const UI_END_PANEL_PNG: &[u8] = embedded_bytes!("../assets/art/ui/end-panel.png");
+const UI_MENU_BACKGROUND_PNG: &[u8] = embedded_bytes!("../assets/art/ui/menu-background.png");
+const UI_HUD_OVERLAY_PNG: &[u8] = embedded_bytes!("../assets/art/ui/hud-overlay.png");
 const FONT_CJK_TTF: &[u8] = embedded_bytes!("../assets/fonts/SarasaMonoSC-subset.ttf");
 const AUDIO_MUSIC_LOOP: &str = "audio/music-loop.wav";
 const AUDIO_PLANT_PLACE: &str = "audio/plant-place.wav";
@@ -117,6 +121,8 @@ const ENV_SOIL_BORDER: &str = "art/environment/soil-border.png";
 const UI_MENU_PANEL: &str = "art/ui/menu-panel.png";
 const UI_HUD_PANEL: &str = "art/ui/hud-panel.png";
 const UI_END_PANEL: &str = "art/ui/end-panel.png";
+const UI_MENU_BACKGROUND: &str = "art/ui/menu-background.png";
+const UI_HUD_OVERLAY: &str = "art/ui/hud-overlay.png";
 const FONT_CJK: &str = "fonts/SarasaMonoSC-subset.ttf";
 const AUDIO_ASSETS: [(&str, &[u8]); 7] = [
     ("assets/audio/music-loop.wav", MUSIC_LOOP_WAV),
@@ -144,10 +150,12 @@ const ENVIRONMENT_ASSETS: [(&str, &[u8]); 3] = [
     ),
 ];
 #[cfg(test)]
-const UI_ASSETS: [(&str, &[u8]); 3] = [
+const UI_ASSETS: [(&str, &[u8]); 5] = [
     ("assets/art/ui/menu-panel.png", UI_MENU_PANEL_PNG),
     ("assets/art/ui/hud-panel.png", UI_HUD_PANEL_PNG),
     ("assets/art/ui/end-panel.png", UI_END_PANEL_PNG),
+    ("assets/art/ui/menu-background.png", UI_MENU_BACKGROUND_PNG),
+    ("assets/art/ui/hud-overlay.png", UI_HUD_OVERLAY_PNG),
 ];
 const PLANT_SPRITE_ASSETS: [(&str, &[u8]); 10] = [
     (
@@ -345,6 +353,7 @@ struct StoreScreenshotMode {
 struct BoardState {
     level_index: usize,
     sun: u32,
+    sun_pickups_collected: u32,
     cursor_col: usize,
     cursor_lane: usize,
     selected: PlantKind,
@@ -421,9 +430,23 @@ struct PauseState {
     paused: bool,
 }
 
+#[derive(Resource, Debug, Clone, Copy, Default, Eq, PartialEq)]
+enum PointerTool {
+    #[default]
+    Plant,
+    Shovel,
+}
+
 #[derive(Resource)]
 struct UiFonts {
     cjk: Handle<Font>,
+}
+
+#[derive(Resource)]
+struct UnitVisualAssets {
+    mesh: Handle<Mesh>,
+    plant_materials: Vec<Handle<StandardMaterial>>,
+    zombie_materials: Vec<Handle<StandardMaterial>>,
 }
 
 #[derive(Resource, Default)]
@@ -634,6 +657,7 @@ impl Default for BoardState {
         Self {
             level_index: 0,
             sun: 125,
+            sun_pickups_collected: 0,
             cursor_col: 0,
             cursor_lane: 2,
             selected: PlantKind::Peashooter,
@@ -670,6 +694,7 @@ impl BoardState {
         Self {
             level_index,
             sun: level.starting_sun,
+            sun_pickups_collected: 0,
             cursor_col: 0,
             cursor_lane: 2,
             selected: PlantKind::Peashooter,
@@ -714,8 +739,20 @@ struct MenuLevelRow(usize);
 #[derive(Component)]
 struct MenuStartButton;
 
-#[derive(Component)]
-struct MenuSettingsText;
+#[derive(Component, Clone, Copy, Eq, PartialEq)]
+enum SettingsControlButton {
+    Language,
+    Fullscreen,
+    VolumeDown,
+    VolumeUp,
+}
+
+#[derive(Component, Clone, Copy, Eq, PartialEq)]
+enum SettingsControlLabel {
+    Language,
+    Fullscreen,
+    Volume,
+}
 
 #[derive(Component)]
 struct PauseUi;
@@ -747,6 +784,18 @@ struct WaveBarFill;
 
 #[derive(Component)]
 struct SeedButton(PlantKind);
+
+#[derive(Component)]
+struct SeedCardPortrait(PlantKind);
+
+#[derive(Component)]
+struct SeedCardKeyText(PlantKind);
+
+#[derive(Component)]
+struct SeedCardNameText(PlantKind);
+
+#[derive(Component)]
+struct SeedCardCostText(PlantKind);
 
 #[derive(Component)]
 struct WaveBanner {
@@ -782,16 +831,37 @@ struct EndSubtitleText;
 struct HudUi;
 
 #[derive(Component)]
-struct HudText;
+struct HudLevelText;
 
 #[derive(Component)]
-struct HudStatusText;
+struct HudSunText;
 
 #[derive(Component)]
-struct HudSeedBankText;
+struct HudWaveText;
+
+#[derive(Component)]
+struct HudScoreText;
+
+#[derive(Component)]
+struct HudSelectedText;
+
+#[derive(Component)]
+struct HudSelectedPortrait;
+
+#[derive(Component)]
+struct HudPauseButton;
+
+#[derive(Component)]
+struct HudShovelButton;
+
+#[derive(Component)]
+struct HudShovelTooltip;
 
 #[derive(Component)]
 struct CursorMarker;
+
+#[derive(Component)]
+struct PlacementGhost;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum PlantKind {
@@ -875,6 +945,22 @@ impl PlantKind {
             .unwrap_or_else(|| self.fallback_label())
     }
 
+    fn hud_label(self, locale: &LocaleText, language: Language) -> &str {
+        match (language, self) {
+            (Language::English, Self::Peashooter) => "Sprout",
+            (Language::English, Self::Sunflower) => "Sunbloom",
+            (Language::English, Self::Wallnut) => "Bulwark",
+            (Language::English, Self::SnowPea) => "Frost",
+            (Language::English, Self::Repeater) => "Twin Pod",
+            (Language::English, Self::CabbagePult) => "Lobber",
+            (Language::English, Self::Spikeweed) => "Briar",
+            (Language::English, Self::CherryBomb) => "Blast",
+            (Language::English, Self::Torchwood) => "Ember",
+            (Language::English, Self::Garlic) => "Scent",
+            (Language::Chinese, _) => self.label(locale),
+        }
+    }
+
     fn cost(self) -> u32 {
         match self {
             Self::Peashooter => 100,
@@ -918,6 +1004,31 @@ impl PlantKind {
             Self::Torchwood => "art/sprites/plants/ember-stump.png",
             Self::Garlic => "art/sprites/plants/scent-root.png",
         }
+    }
+
+    fn visual_scale(self) -> f32 {
+        match self {
+            Self::Wallnut => 1.08,
+            Self::CabbagePult | Self::Torchwood => 1.02,
+            Self::Spikeweed => 0.86,
+            Self::CherryBomb | Self::Garlic => 0.92,
+            _ => 0.98,
+        }
+    }
+
+    fn visual_center_y(self) -> f32 {
+        0.06 + self.visual_scale() * 0.54
+    }
+
+    fn portrait_rect(self) -> Rect {
+        let top = match self {
+            Self::Spikeweed => 96.0,
+            Self::CherryBomb | Self::Torchwood => 64.0,
+            Self::Garlic => 48.0,
+            Self::CabbagePult => 32.0,
+            _ => 0.0,
+        };
+        Rect::new(0.0, top, 512.0, top + 512.0)
     }
 
     fn model_path(self) -> &'static str {
@@ -1098,6 +1209,20 @@ impl ZombieKind {
         }
     }
 
+    fn visual_scale(self) -> f32 {
+        match self {
+            Self::Runner | Self::Digger => 0.94,
+            Self::Conehead | Self::Buckethead | Self::Healer | Self::Jumper => 1.03,
+            Self::Brute | Self::Frostbite => 1.14,
+            Self::Gargantuar => 1.58,
+            Self::Walker => 1.0,
+        }
+    }
+
+    fn visual_center_y(self) -> f32 {
+        0.06 + self.visual_scale() * 0.54
+    }
+
     fn model_path(self) -> &'static str {
         match self {
             Self::Walker => "models/monsters/walker.glb",
@@ -1221,6 +1346,8 @@ fn embedded_asset_for_path(path: &str) -> Option<&'static [u8]> {
         "assets/art/ui/menu-panel.png" => Some(UI_MENU_PANEL_PNG),
         "assets/art/ui/hud-panel.png" => Some(UI_HUD_PANEL_PNG),
         "assets/art/ui/end-panel.png" => Some(UI_END_PANEL_PNG),
+        "assets/art/ui/menu-background.png" => Some(UI_MENU_BACKGROUND_PNG),
+        "assets/art/ui/hud-overlay.png" => Some(UI_HUD_OVERLAY_PNG),
         "assets/fonts/SarasaMonoSC-subset.ttf" => Some(FONT_CJK_TTF),
         "assets/data/levels.ron" => Some(LEVELS_RON.as_bytes()),
         "assets/i18n/en.ron" => Some(EN_RON.as_bytes()),
@@ -1259,6 +1386,8 @@ fn runtime_asset_paths() -> Vec<&'static str> {
         UI_MENU_PANEL,
         UI_HUD_PANEL,
         UI_END_PANEL,
+        UI_MENU_BACKGROUND,
+        UI_HUD_OVERLAY,
         FONT_CJK,
     ]);
     paths.extend(PlantKind::ALL.iter().map(|plant| plant.sprite_path()));
@@ -2792,8 +2921,8 @@ fn control_bindings() -> Vec<(&'static str, &'static str, &'static str)> {
         ),
         (
             "Mouse left",
-            "gameplay",
-            "move cursor and plant selected seed",
+            "menu/gameplay",
+            "activate UI, collect sun, and use the active lawn tool",
         ),
         (
             "Mouse right",
@@ -2817,7 +2946,7 @@ fn control_bindings() -> Vec<(&'static str, &'static str, &'static str)> {
             "start unlocked level or plant selected seed",
         ),
         ("Backspace", "gameplay", "shovel selected tile"),
-        ("C", "gameplay", "collect sun on selected tile"),
+        ("C", "gameplay", "collect every visible sun"),
         ("L", "global", "switch language"),
         ("P", "gameplay", "pause or resume"),
         ("F", "global", "toggle fullscreen"),
@@ -3032,8 +3161,10 @@ fn input_flow_audit_report() -> Result<String, String> {
         "gameplay placement: affordable, paused, occupied, cooldown, insufficient sun covered"
             .to_string(),
     );
-    lines.push("gameplay shovel: keyboard and mouse bindings covered by control map".to_string());
-    lines.push("gameplay collection: cursor sun collection key covered by control map".to_string());
+    lines.push(
+        "gameplay shovel: visible tool plus mouse and keyboard shortcuts covered".to_string(),
+    );
+    lines.push("gameplay collection: direct sun clicks plus keyboard magnet covered".to_string());
     lines.push("pause gating: planting blocked while paused".to_string());
     lines.push("end flow: retry keys covered by control map".to_string());
     lines.push(format!("checked bindings: {}", control_bindings().len()));
@@ -3311,7 +3442,7 @@ fn layout_audit_report() -> Result<String, String> {
         audit_text_block(
             &mut lines,
             &format!("{lang} pause panel"),
-            &pause_text(locale, language, &settings),
+            &pause_text(locale, language),
             96,
             2,
         )?;
@@ -3509,13 +3640,15 @@ fn visual_readability_audit_report() -> Result<String, String> {
     }
 
     for required_asset in [
-        "assets/art/sprites/plants/sprout-slinger.png | png 251x627",
-        "assets/art/sprites/monsters/gargantuar.png | png 251x627",
+        "assets/art/sprites/plants/sprout-slinger.png | png 512x640",
+        "assets/art/sprites/monsters/gargantuar.png | png 512x640",
         "assets/art/effects/explosion.png | png 256x256",
         "assets/art/environment/lawn-base.png | png 512x512",
         "assets/art/ui/menu-panel.png | png 192x192",
         "assets/art/ui/hud-panel.png | png 192x96",
         "assets/art/ui/end-panel.png | png 192x192",
+        "assets/art/ui/menu-background.png | png 1672x941",
+        "assets/art/ui/hud-overlay.png | png 1672x941",
     ] {
         if !asset_report.contains(required_asset) {
             return Err(format!(
@@ -3543,7 +3676,7 @@ fn accessibility_audit_report() -> Result<String, String> {
         "Arrow keys | menu/gameplay | choose levels and move grid cursor",
         "Space | menu/gameplay | start unlocked level or plant selected seed",
         "Backspace | gameplay | shovel selected tile",
-        "C | gameplay | collect sun on selected tile",
+        "C | gameplay | collect every visible sun",
         "L | global | switch language",
         "P | gameplay | pause or resume",
         "F | global | toggle fullscreen",
@@ -4782,6 +4915,7 @@ fn main() {
         })
         .insert_resource(settings)
         .insert_resource(PauseState::default())
+        .insert_resource(PointerTool::default())
         .insert_resource(OnboardingState::default())
         .insert_resource(ScreenShake::default())
         .insert_resource(StoreScreenshotMode {
@@ -4807,11 +4941,14 @@ fn main() {
         .add_systems(Startup, apply_saved_window_settings)
         .add_systems(Startup, setup_audio)
         .add_systems(Startup, setup_ui_fonts)
+        .add_systems(Startup, setup_unit_visual_assets)
         .add_systems(
             Update,
             (
                 toggle_language,
                 settings_input,
+                settings_mouse,
+                update_settings_control_labels,
                 apply_audio_volume,
                 toggle_pause,
                 apply_language_font,
@@ -4831,6 +4968,9 @@ fn main() {
         .add_systems(
             Update,
             (
+                hud_pause_button,
+                hud_shovel_button,
+                seed_card_clicks,
                 handle_board_input,
                 update_cursor,
                 tick_plant_cooldowns,
@@ -4838,7 +4978,6 @@ fn main() {
                 pause_menu_buttons,
                 update_pause_ui,
                 update_hud,
-                seed_card_clicks,
                 update_seed_cards,
                 update_wave_bar,
                 update_onboarding,
@@ -5630,11 +5769,7 @@ fn settings_input(
     if keyboard.just_pressed(KeyCode::KeyF) {
         settings.fullscreen = !settings.fullscreen;
         if let Ok(mut window) = windows.single_mut() {
-            window.mode = if settings.fullscreen {
-                WindowMode::BorderlessFullscreen(MonitorSelection::Primary)
-            } else {
-                WindowMode::Windowed
-            };
+            apply_fullscreen_mode(&mut window, settings.fullscreen);
         }
         changed = true;
     }
@@ -5643,9 +5778,144 @@ fn settings_input(
     }
 }
 
+fn apply_fullscreen_mode(window: &mut Window, fullscreen: bool) {
+    window.mode = if fullscreen {
+        WindowMode::BorderlessFullscreen(MonitorSelection::Primary)
+    } else {
+        WindowMode::Windowed
+    };
+}
+
+#[allow(clippy::type_complexity)]
+fn settings_mouse(
+    mut language: ResMut<LanguageSettings>,
+    progress: Res<ProgressState>,
+    mut settings: ResMut<GameSettings>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
+    mut controls: Query<
+        (
+            &Interaction,
+            &SettingsControlButton,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
+        (Changed<Interaction>, With<Button>),
+    >,
+) {
+    let mut changed = false;
+    for (interaction, action, mut background, mut border) in &mut controls {
+        let (background_color, border_color) = match interaction {
+            Interaction::Pressed => (
+                Color::srgba(0.34, 0.49, 0.18, 0.98),
+                Color::srgb(1.0, 0.84, 0.38),
+            ),
+            Interaction::Hovered => (
+                Color::srgba(0.24, 0.38, 0.14, 0.96),
+                Color::srgb(0.88, 0.83, 0.48),
+            ),
+            Interaction::None => (
+                Color::srgba(0.08, 0.14, 0.07, 0.88),
+                Color::srgba(0.76, 0.68, 0.38, 0.58),
+            ),
+        };
+        *background = BackgroundColor(background_color);
+        border.set_all(border_color);
+
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        match action {
+            SettingsControlButton::Language => {
+                language.current = language.current.next();
+            }
+            SettingsControlButton::Fullscreen => {
+                settings.fullscreen = !settings.fullscreen;
+                if let Ok(mut window) = windows.single_mut() {
+                    apply_fullscreen_mode(&mut window, settings.fullscreen);
+                }
+            }
+            SettingsControlButton::VolumeDown => {
+                settings.master_volume = volume_after_step(settings.master_volume, -0.1);
+            }
+            SettingsControlButton::VolumeUp => {
+                settings.master_volume = volume_after_step(settings.master_volume, 0.1);
+            }
+        }
+        changed = true;
+    }
+    if changed {
+        save_progress(language.current, &progress, &settings);
+    }
+}
+
+fn settings_control_label(
+    label: SettingsControlLabel,
+    language: Language,
+    settings: &GameSettings,
+) -> String {
+    match label {
+        SettingsControlLabel::Language => match language {
+            Language::English => "EN".to_string(),
+            Language::Chinese => "中文".to_string(),
+        },
+        SettingsControlLabel::Fullscreen => match (language, settings.fullscreen) {
+            (Language::English, true) => "FULL".to_string(),
+            (Language::English, false) => "WINDOW".to_string(),
+            (Language::Chinese, true) => "全屏".to_string(),
+            (Language::Chinese, false) => "窗口".to_string(),
+        },
+        SettingsControlLabel::Volume => format!("{:.0}%", settings.master_volume * 100.0),
+    }
+}
+
+fn update_settings_control_labels(
+    language: Res<LanguageSettings>,
+    settings: Res<GameSettings>,
+    mut labels: Query<(&mut Text, &SettingsControlLabel)>,
+) {
+    for (mut text, label) in &mut labels {
+        let value = settings_control_label(*label, language.current, &settings);
+        if text.0 != value {
+            text.0 = value;
+        }
+    }
+}
+
 fn setup_ui_fonts(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.insert_resource(UiFonts {
         cjk: asset_server.load(FONT_CJK),
+    });
+}
+
+fn setup_unit_visual_assets(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+) {
+    let mesh = meshes.add(billboard_mesh(1.10, 1.375));
+    let mut material_for = |path: &'static str| {
+        materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            base_color_texture: Some(asset_server.load(path)),
+            alpha_mode: AlphaMode::Blend,
+            cull_mode: None,
+            unlit: true,
+            ..default()
+        })
+    };
+    let plant_materials = PlantKind::ALL
+        .iter()
+        .map(|kind| material_for(kind.sprite_path()))
+        .collect();
+    let zombie_materials = ZombieKind::ALL
+        .iter()
+        .map(|kind| material_for(kind.sprite_path()))
+        .collect();
+    commands.insert_resource(UnitVisualAssets {
+        mesh,
+        plant_materials,
+        zombie_materials,
     });
 }
 
@@ -5768,6 +6038,166 @@ fn menu_settings_line(settings: &GameSettings, language: Language) -> String {
     )
 }
 
+fn menu_display_help(language: Language) -> &'static str {
+    match language {
+        Language::English => "CHOOSE A MISSION  ·  CLICK DEPLOY",
+        Language::Chinese => "选择关卡  ·  点击开始",
+    }
+}
+
+fn menu_display_level(
+    locale: &LocaleText,
+    language: Language,
+    levels: &LevelCatalog,
+    progress: &ProgressState,
+) -> String {
+    let index = levels.selected;
+    let level = &levels.levels[index];
+    let best = progress
+        .best_score(index)
+        .map(|score| score.to_string())
+        .unwrap_or_else(|| locale.no_score.clone());
+    match language {
+        Language::English => format!(
+            "MISSION {:02}\n{}\n{}  {}",
+            index + 1,
+            level.title(language),
+            locale.best_score.to_uppercase(),
+            best
+        ),
+        Language::Chinese => format!(
+            "第 {:02} 关\n{}\n{}  {}",
+            index + 1,
+            level.title(language),
+            locale.best_score,
+            best
+        ),
+    }
+}
+
+fn menu_display_roster(
+    locale: &LocaleText,
+    language: Language,
+    levels: &LevelCatalog,
+    progress: &ProgressState,
+    index: usize,
+) -> String {
+    let label = if progress.is_unlocked(index) {
+        levels.levels[index].title(language)
+    } else {
+        locale.locked_level.as_str()
+    };
+    format!("{:02}  {label}", index + 1)
+}
+
+fn menu_display_start(language: Language, unlocked: bool) -> &'static str {
+    match (language, unlocked) {
+        (Language::English, true) => "DEPLOY",
+        (Language::English, false) => "LOCKED",
+        (Language::Chinese, true) => "开始防守",
+        (Language::Chinese, false) => "未解锁",
+    }
+}
+
+fn spawn_settings_button(
+    parent: &mut ChildSpawnerCommands,
+    action: SettingsControlButton,
+    label: String,
+    dynamic_label: Option<SettingsControlLabel>,
+    width: f32,
+) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Px(width),
+                height: Val::Px(30.0),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.08, 0.14, 0.07, 0.88)),
+            BorderColor::all(Color::srgba(0.76, 0.68, 0.38, 0.58)),
+            action,
+        ))
+        .with_children(|button| {
+            let mut label_entity = button.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.91, 0.93, 0.79)),
+                TextLayout::new_with_justify(Justify::Center),
+                TextShadow {
+                    offset: Vec2::new(1.0, 1.0),
+                    color: Color::srgba(0.0, 0.0, 0.0, 0.88),
+                },
+            ));
+            if let Some(marker) = dynamic_label {
+                label_entity.insert(marker);
+            }
+        });
+}
+
+fn spawn_settings_controls(
+    parent: &mut ChildSpawnerCommands,
+    language: Language,
+    settings: &GameSettings,
+) {
+    spawn_settings_button(
+        parent,
+        SettingsControlButton::Language,
+        settings_control_label(SettingsControlLabel::Language, language, settings),
+        Some(SettingsControlLabel::Language),
+        54.0,
+    );
+    spawn_settings_button(
+        parent,
+        SettingsControlButton::Fullscreen,
+        settings_control_label(SettingsControlLabel::Fullscreen, language, settings),
+        Some(SettingsControlLabel::Fullscreen),
+        76.0,
+    );
+    spawn_settings_button(
+        parent,
+        SettingsControlButton::VolumeDown,
+        "-".to_string(),
+        None,
+        32.0,
+    );
+    parent.spawn((
+        Node {
+            width: Val::Px(48.0),
+            height: Val::Px(30.0),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        Text::new(settings_control_label(
+            SettingsControlLabel::Volume,
+            language,
+            settings,
+        )),
+        TextFont {
+            font_size: 12.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.98, 0.83, 0.36)),
+        TextLayout::new_with_justify(Justify::Center),
+        SettingsControlLabel::Volume,
+    ));
+    spawn_settings_button(
+        parent,
+        SettingsControlButton::VolumeUp,
+        "+".to_string(),
+        None,
+        32.0,
+    );
+}
+
 fn spawn_menu(
     mut commands: Commands,
     language: Res<LanguageSettings>,
@@ -5783,70 +6213,114 @@ fn spawn_menu(
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(10.0),
                 ..default()
             },
-            ui_panel_image(&asset_server, UI_MENU_PANEL),
+            BackgroundColor(Color::srgb(0.04, 0.08, 0.04)),
             MenuUi,
+            Name::new("Illustrated Main Menu"),
         ))
         .with_children(|parent| {
             parent.spawn((
-                Text::new(locale.title.clone()),
-                TextFont {
-                    font_size: 50.0,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
                     ..default()
                 },
-                TextColor(Color::srgb(0.88, 0.96, 0.68)),
-                MenuTitleText,
+                ui_stretched_image(&asset_server, UI_MENU_BACKGROUND),
+                Name::new("Menu Background Art"),
             ));
-            parent.spawn((
-                Text::new(locale.menu_help.clone()),
-                TextFont {
-                    font_size: 17.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.74, 0.84, 0.68)),
-                MenuHelpText,
-            ));
-            parent.spawn((
-                Text::new(menu_level_line(
-                    locale,
-                    language.current,
-                    &levels,
-                    &progress,
-                )),
-                TextFont {
-                    font_size: 22.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.86, 0.82, 0.58)),
-                MenuLevelText,
-            ));
+
             parent
-                .spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(2.0),
-                    ..default()
-                })
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(22.0),
+                        top: Val::Percent(5.0),
+                        width: Val::Percent(29.0),
+                        height: Val::Percent(39.0),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        row_gap: Val::Px(5.0),
+                        ..default()
+                    },
+                    Name::new("Menu Brand"),
+                ))
+                .with_children(|brand| {
+                    brand.spawn((
+                        Node {
+                            width: Val::Px(82.0),
+                            height: Val::Px(82.0),
+                            ..default()
+                        },
+                        ImageNode::new(asset_server.load("branding/generated/app-icon.png")),
+                    ));
+                    brand.spawn((
+                        Text::new(locale.title.clone()),
+                        TextFont {
+                            font_size: 42.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(1.0, 0.91, 0.58)),
+                        TextLayout::new_with_justify(Justify::Center),
+                        TextShadow {
+                            offset: Vec2::new(3.0, 4.0),
+                            color: Color::srgba(0.02, 0.04, 0.01, 0.95),
+                        },
+                        MenuTitleText,
+                    ));
+                });
+
+            parent
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(52.7),
+                        top: Val::Percent(24.5),
+                        width: Val::Percent(24.4),
+                        height: Val::Percent(37.5),
+                        flex_wrap: FlexWrap::Wrap,
+                        align_content: AlignContent::SpaceBetween,
+                        justify_content: JustifyContent::SpaceBetween,
+                        column_gap: Val::Percent(2.0),
+                        row_gap: Val::Percent(1.8),
+                        ..default()
+                    },
+                    Name::new("Campaign Board"),
+                ))
                 .with_children(|list| {
                     for index in 0..levels.levels.len() {
+                        let unlocked = progress.is_unlocked(index);
                         list.spawn((
                             Button,
                             Node {
-                                padding: UiRect::axes(Val::Px(14.0), Val::Px(3.0)),
-                                justify_content: JustifyContent::FlexStart,
-                                border_radius: BorderRadius::all(Val::Px(6.0)),
+                                width: Val::Percent(48.8),
+                                height: Val::Percent(18.4),
+                                border: UiRect::all(Val::Px(1.0)),
+                                padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
-                            BackgroundColor(Color::NONE),
+                            BackgroundColor(if index == levels.selected {
+                                Color::srgba(0.18, 0.34, 0.13, 0.92)
+                            } else {
+                                Color::srgba(0.02, 0.04, 0.025, 0.34)
+                            }),
+                            BorderColor::all(if index == levels.selected {
+                                Color::srgb(0.93, 0.72, 0.25)
+                            } else {
+                                Color::srgba(0.72, 0.59, 0.31, 0.46)
+                            }),
                             MenuLevelRow(index),
                         ))
                         .with_children(|row| {
                             row.spawn((
-                                Text::new(menu_roster_line(
+                                Text::new(menu_display_roster(
                                     locale,
                                     language.current,
                                     &levels,
@@ -5854,49 +6328,141 @@ fn spawn_menu(
                                     index,
                                 )),
                                 TextFont {
-                                    font_size: 18.0,
+                                    font_size: 12.0,
                                     ..default()
                                 },
-                                TextColor(Color::srgb(0.78, 0.88, 0.66)),
+                                TextColor(if unlocked {
+                                    Color::srgb(0.91, 0.92, 0.75)
+                                } else {
+                                    Color::srgb(0.46, 0.47, 0.40)
+                                }),
+                                TextLayout::new_with_justify(Justify::Center),
+                                TextShadow {
+                                    offset: Vec2::new(1.0, 1.0),
+                                    color: Color::srgba(0.0, 0.0, 0.0, 0.85),
+                                },
                                 MenuRosterText,
                                 MenuLevelRow(index),
                             ));
                         });
                     }
                 });
-            parent.spawn((
-                Text::new(menu_settings_line(&settings, language.current)),
-                TextFont {
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.72, 0.82, 0.90)),
-                MenuSettingsText,
-            ));
+
             parent
                 .spawn((
-                    Button,
                     Node {
-                        padding: UiRect::axes(Val::Px(22.0), Val::Px(8.0)),
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(24.0),
+                        top: Val::Percent(46.0),
+                        width: Val::Percent(25.0),
+                        min_height: Val::Percent(23.0),
+                        padding: UiRect::axes(Val::Px(18.0), Val::Px(12.0)),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
                         justify_content: JustifyContent::Center,
-                        border_radius: BorderRadius::all(Val::Px(10.0)),
+                        row_gap: Val::Px(9.0),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(6.0)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(0.16, 0.24, 0.10, 0.85)),
-                    MenuStartButton,
+                    BackgroundColor(Color::srgba(0.025, 0.06, 0.025, 0.70)),
+                    BorderColor::all(Color::srgba(0.91, 0.70, 0.27, 0.66)),
+                    Name::new("Selected Mission"),
                 ))
-                .with_children(|button| {
-                    button.spawn((
-                        Text::new(locale.menu_start.clone()),
+                .with_children(|mission| {
+                    mission.spawn((
+                        Text::new(menu_display_level(
+                            locale,
+                            language.current,
+                            &levels,
+                            &progress,
+                        )),
                         TextFont {
-                            font_size: 26.0,
+                            font_size: 19.0,
                             ..default()
                         },
-                        TextColor(Color::srgb(0.96, 0.78, 0.30)),
-                        MenuStartText,
+                        TextColor(Color::srgb(0.97, 0.91, 0.67)),
+                        TextLayout::new_with_justify(Justify::Center),
+                        TextShadow {
+                            offset: Vec2::new(2.0, 2.0),
+                            color: Color::srgba(0.0, 0.0, 0.0, 0.90),
+                        },
+                        MenuLevelText,
+                    ));
+                    mission
+                        .spawn((
+                            Button,
+                            Node {
+                                width: Val::Percent(88.0),
+                                height: Val::Px(46.0),
+                                border: UiRect::all(Val::Px(2.0)),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                border_radius: BorderRadius::all(Val::Px(6.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.13, 0.30, 0.08, 0.94)),
+                            BorderColor::all(Color::srgb(0.95, 0.72, 0.24)),
+                            MenuStartButton,
+                        ))
+                        .with_children(|button| {
+                            button.spawn((
+                                Text::new(menu_display_start(
+                                    language.current,
+                                    progress.is_unlocked(levels.selected),
+                                )),
+                                TextFont {
+                                    font_size: 22.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(1.0, 0.84, 0.34)),
+                                TextShadow {
+                                    offset: Vec2::new(2.0, 2.0),
+                                    color: Color::srgba(0.0, 0.0, 0.0, 0.88),
+                                },
+                                MenuStartText,
+                            ));
+                        });
+                    mission.spawn((
+                        Text::new(menu_display_help(language.current)),
+                        TextFont {
+                            font_size: 10.5,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.77, 0.84, 0.65)),
+                        TextLayout::new_with_justify(Justify::Center),
+                        MenuHelpText,
                     ));
                 });
+
+            parent
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(20.0),
+                        bottom: Val::Percent(3.0),
+                        width: Val::Percent(35.0),
+                        min_height: Val::Px(38.0),
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        column_gap: Val::Px(6.0),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.02, 0.055, 0.025, 0.66)),
+                    BorderColor::all(Color::srgba(0.83, 0.69, 0.33, 0.48)),
+                    Name::new("Mouse Settings Controls"),
+                ))
+                .with_children(|controls| {
+                    spawn_settings_controls(controls, language.current, &settings);
+                });
         });
+}
+
+fn ui_stretched_image(asset_server: &AssetServer, texture: &'static str) -> ImageNode {
+    ImageNode::new(asset_server.load(texture)).with_mode(NodeImageMode::Stretch)
 }
 
 fn ui_panel_image(asset_server: &AssetServer, texture: &'static str) -> ImageNode {
@@ -5923,21 +6489,15 @@ fn update_menu_text(
     localization: Res<LocalizationCatalog>,
     levels: Res<LevelCatalog>,
     progress: Res<ProgressState>,
-    settings: Res<GameSettings>,
     mut text_queries: ParamSet<(
         Query<&mut Text, With<MenuTitleText>>,
         Query<&mut Text, With<MenuHelpText>>,
         Query<&mut Text, With<MenuLevelText>>,
         Query<(&mut Text, &MenuLevelRow), With<MenuRosterText>>,
-        Query<&mut Text, With<MenuSettingsText>>,
         Query<&mut Text, With<MenuStartText>>,
     )>,
 ) {
-    if !language.is_changed()
-        && !levels.is_changed()
-        && !progress.is_changed()
-        && !settings.is_changed()
-    {
+    if !language.is_changed() && !levels.is_changed() && !progress.is_changed() {
         return;
     }
     let locale = localization.text(language.current);
@@ -5945,19 +6505,17 @@ fn update_menu_text(
         **text = locale.title.clone();
     }
     if let Ok(mut text) = text_queries.p1().single_mut() {
-        **text = locale.menu_help.clone();
+        **text = menu_display_help(language.current).to_string();
     }
     if let Ok(mut text) = text_queries.p2().single_mut() {
-        **text = menu_level_line(locale, language.current, &levels, &progress);
+        **text = menu_display_level(locale, language.current, &levels, &progress);
     }
     for (mut text, row) in text_queries.p3().iter_mut() {
-        **text = menu_roster_line(locale, language.current, &levels, &progress, row.0);
+        **text = menu_display_roster(locale, language.current, &levels, &progress, row.0);
     }
     if let Ok(mut text) = text_queries.p4().single_mut() {
-        **text = menu_settings_line(&settings, language.current);
-    }
-    if let Ok(mut text) = text_queries.p5().single_mut() {
-        **text = locale.menu_start.clone();
+        **text =
+            menu_display_start(language.current, progress.is_unlocked(levels.selected)).to_string();
     }
 }
 
@@ -6017,10 +6575,7 @@ fn menu_mouse(
     mut levels: ResMut<LevelCatalog>,
     mut next: ResMut<NextState<GameState>>,
     mut rows: Query<(&Interaction, &MenuLevelRow), (Changed<Interaction>, With<Button>)>,
-    mut start: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<MenuStartButton>),
-    >,
+    start: Query<&Interaction, (Changed<Interaction>, With<MenuStartButton>)>,
 ) {
     for (interaction, row) in rows.iter_mut() {
         match interaction {
@@ -6034,19 +6589,11 @@ fn menu_mouse(
             Interaction::None => (),
         }
     }
-    for (interaction, mut background) in start.iter_mut() {
-        match interaction {
-            Interaction::Hovered => {
-                *background = BackgroundColor(Color::srgba(0.26, 0.38, 0.16, 0.92));
-            }
-            Interaction::Pressed => {
-                if can_start_selected_level(&progress, levels.selected) {
-                    next.set(GameState::Playing);
-                }
-            }
-            Interaction::None => {
-                *background = BackgroundColor(Color::srgba(0.16, 0.24, 0.10, 0.85));
-            }
+    for interaction in &start {
+        if *interaction == Interaction::Pressed
+            && can_start_selected_level(&progress, levels.selected)
+        {
+            next.set(GameState::Playing);
         }
     }
 }
@@ -6055,20 +6602,70 @@ fn menu_mouse(
 fn style_menu_rows(
     levels: Res<LevelCatalog>,
     progress: Res<ProgressState>,
-    mut rows: Query<(&Interaction, &MenuLevelRow, &mut BackgroundColor), With<Button>>,
+    mut rows: Query<
+        (
+            &Interaction,
+            &MenuLevelRow,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
+        (With<Button>, Without<MenuStartButton>),
+    >,
+    mut labels: Query<(&MenuLevelRow, &mut TextColor), With<MenuRosterText>>,
+    mut start: Query<
+        (&Interaction, &mut BackgroundColor, &mut BorderColor),
+        (With<MenuStartButton>, Without<MenuLevelRow>),
+    >,
 ) {
-    for (interaction, row, mut background) in rows.iter_mut() {
+    for (interaction, row, mut background, mut border) in rows.iter_mut() {
         let locked = !progress.is_unlocked(row.0);
         let color = if *interaction == Interaction::Hovered && !locked {
-            Color::srgba(0.34, 0.50, 0.22, 0.60)
+            Color::srgba(0.27, 0.45, 0.16, 0.92)
         } else if row.0 == levels.selected {
-            Color::srgba(0.22, 0.36, 0.14, 0.55)
+            Color::srgba(0.18, 0.34, 0.13, 0.92)
         } else {
-            Color::NONE
+            Color::srgba(0.02, 0.04, 0.025, 0.34)
         };
         if background.0 != color {
             *background = BackgroundColor(color);
         }
+        let border_color = if row.0 == levels.selected {
+            Color::srgb(0.95, 0.72, 0.24)
+        } else if *interaction == Interaction::Hovered && !locked {
+            Color::srgb(0.74, 0.89, 0.45)
+        } else {
+            Color::srgba(0.72, 0.59, 0.31, 0.46)
+        };
+        if border.top != border_color {
+            border.set_all(border_color);
+        }
+    }
+    for (row, mut color) in &mut labels {
+        let target = if !progress.is_unlocked(row.0) {
+            Color::srgb(0.46, 0.47, 0.40)
+        } else if row.0 == levels.selected {
+            Color::srgb(1.0, 0.87, 0.42)
+        } else {
+            Color::srgb(0.91, 0.92, 0.75)
+        };
+        if color.0 != target {
+            color.0 = target;
+        }
+    }
+    for (interaction, mut background, mut border) in &mut start {
+        let unlocked = progress.is_unlocked(levels.selected);
+        let target = match (*interaction, unlocked) {
+            (Interaction::Pressed, true) => Color::srgba(0.28, 0.48, 0.14, 0.98),
+            (Interaction::Hovered, true) => Color::srgba(0.22, 0.40, 0.11, 0.98),
+            (_, true) => Color::srgba(0.13, 0.30, 0.08, 0.94),
+            (_, false) => Color::srgba(0.12, 0.12, 0.10, 0.90),
+        };
+        *background = BackgroundColor(target);
+        border.set_all(if unlocked {
+            Color::srgb(0.95, 0.72, 0.24)
+        } else {
+            Color::srgb(0.39, 0.39, 0.34)
+        });
     }
 }
 
@@ -6158,10 +6755,12 @@ fn spawn_greenhouse_dressing(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn start_game(
     mut commands: Commands,
     mut state: ResMut<BoardState>,
     levels: Res<LevelCatalog>,
+    mut pointer_tool: ResMut<PointerTool>,
     mut onboarding: ResMut<OnboardingState>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -6169,6 +6768,7 @@ fn start_game(
 ) {
     let level = &levels.levels[levels.selected];
     *state = BoardState::for_level(levels.selected, level);
+    *pointer_tool = PointerTool::Plant;
     *onboarding = OnboardingState::default();
 
     let floor_mesh = meshes.add(Cuboid::new(13.2, 0.18, 8.0));
@@ -6248,118 +6848,617 @@ fn start_game(
         GameEntity,
     ));
 
+    let ghost_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.82, 1.0, 0.72, 0.62),
+        base_color_texture: Some(asset_server.load(state.selected.sprite_path())),
+        emissive: Color::srgb(0.08, 0.14, 0.04).into(),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    });
+    commands.spawn((
+        Mesh3d(meshes.add(billboard_mesh(0.92, 1.15))),
+        MeshMaterial3d(ghost_mat),
+        Transform::from_xyz(col_x(state.cursor_col), 0.56, lane_z(state.cursor_lane))
+            .with_rotation(Quat::from_rotation_x(UNIT_BILLBOARD_TILT)),
+        PlacementGhost,
+        GameEntity,
+        Name::new("Plant Placement Preview"),
+    ));
+
     commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
-                height: Val::Px(74.0),
+                height: Val::Percent(100.0),
                 position_type: PositionType::Absolute,
                 top: Val::Px(0.0),
                 left: Val::Px(0.0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                padding: UiRect::horizontal(Val::Px(24.0)),
                 ..default()
             },
-            ui_panel_image(&asset_server, UI_HUD_PANEL),
             HudUi,
+            Name::new("Illustrated Gameplay HUD"),
         ))
-        .with_children(|parent| {
-            parent.spawn((
-                Text::new(""),
-                TextFont {
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.92, 0.96, 0.78)),
-                HudText,
-                HudStatusText,
-            ));
-        });
-
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                top: Val::Px(78.0),
-                left: Val::Percent(27.0),
-                width: Val::Percent(46.0),
-                height: Val::Px(8.0),
-                padding: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(4.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.02, 0.06, 0.05, 0.85)),
-            HudUi,
-        ))
-        .with_children(|bar| {
-            bar.spawn((
+        .with_children(|hud| {
+            hud.spawn((
                 Node {
-                    width: Val::Percent(0.0),
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    width: Val::Percent(100.0),
                     height: Val::Percent(100.0),
-                    border_radius: BorderRadius::all(Val::Px(3.0)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.45, 0.78, 0.30)),
-                WaveBarFill,
+                ui_stretched_image(&asset_server, UI_HUD_OVERLAY),
+                Name::new("HUD Overlay Art"),
             ));
-        });
 
-    commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Px(112.0),
+            hud.spawn(Node {
                 position_type: PositionType::Absolute,
-                bottom: Val::Px(0.0),
-                left: Val::Px(0.0),
+                left: Val::Percent(13.0),
+                top: Val::Percent(7.0),
+                width: Val::Percent(17.2),
+                height: Val::Percent(9.2),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                padding: UiRect::horizontal(Val::Px(18.0)),
                 ..default()
-            },
-            ui_panel_image(&asset_server, UI_HUD_PANEL),
-            HudUi,
-        ))
-        .with_children(|parent| {
-            parent
-                .spawn(Node {
-                    column_gap: Val::Px(6.0),
-                    align_items: AlignItems::Stretch,
+            })
+            .with_children(|slot| {
+                slot.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.95, 0.91, 0.70)),
+                    TextLayout::new_with_justify(Justify::Center),
+                    TextShadow {
+                        offset: Vec2::new(2.0, 2.0),
+                        color: Color::srgba(0.0, 0.0, 0.0, 0.92),
+                    },
+                    HudLevelText,
+                ));
+            });
+
+            hud.spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(35.1),
+                top: Val::Percent(6.5),
+                width: Val::Percent(6.2),
+                height: Val::Percent(10.4),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            })
+            .with_children(|slot| {
+                slot.spawn((
+                    Node {
+                        width: Val::Px(28.0),
+                        height: Val::Px(28.0),
+                        ..default()
+                    },
+                    ImageNode::new(asset_server.load(EFFECT_SUN)),
+                ));
+                slot.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(1.0, 0.84, 0.25)),
+                    TextShadow {
+                        offset: Vec2::new(1.0, 2.0),
+                        color: Color::srgba(0.08, 0.03, 0.0, 0.92),
+                    },
+                    HudSunText,
+                ));
+            });
+
+            hud.spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(43.7),
+                top: Val::Percent(7.0),
+                width: Val::Percent(9.0),
+                height: Val::Percent(9.5),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: Val::Px(3.0),
+                ..default()
+            })
+            .with_children(|slot| {
+                slot.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: 13.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.92, 0.95, 0.76)),
+                    TextLayout::new_with_justify(Justify::Center),
+                    TextShadow {
+                        offset: Vec2::new(1.0, 2.0),
+                        color: Color::srgba(0.0, 0.0, 0.0, 0.92),
+                    },
+                    HudWaveText,
+                ));
+                slot.spawn((
+                    Node {
+                        width: Val::Percent(78.0),
+                        height: Val::Px(5.0),
+                        padding: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.01, 0.025, 0.015, 0.90)),
+                ))
+                .with_children(|bar| {
+                    bar.spawn((
+                        Node {
+                            width: Val::Percent(0.0),
+                            height: Val::Percent(100.0),
+                            border_radius: BorderRadius::all(Val::Px(2.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.45, 0.78, 0.30)),
+                        WaveBarFill,
+                    ));
+                });
+            });
+
+            hud.spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(55.4),
+                top: Val::Percent(7.0),
+                width: Val::Percent(13.4),
+                height: Val::Percent(9.4),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            })
+            .with_children(|slot| {
+                slot.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: 15.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.95, 0.91, 0.70)),
+                    TextLayout::new_with_justify(Justify::Center),
+                    TextShadow {
+                        offset: Vec2::new(2.0, 2.0),
+                        color: Color::srgba(0.0, 0.0, 0.0, 0.92),
+                    },
+                    HudScoreText,
+                ));
+            });
+
+            hud.spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(71.5),
+                top: Val::Percent(7.0),
+                width: Val::Percent(8.6),
+                height: Val::Percent(9.4),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                column_gap: Val::Px(3.0),
+                ..default()
+            })
+            .with_children(|slot| {
+                slot.spawn((
+                    Node {
+                        width: Val::Px(34.0),
+                        height: Val::Px(34.0),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    ImageNode::new(asset_server.load(state.selected.sprite_path()))
+                        .with_rect(state.selected.portrait_rect())
+                        .with_mode(NodeImageMode::Stretch),
+                    HudSelectedPortrait,
+                ));
+                slot.spawn((
+                    Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    },
+                    Text::new(""),
+                    TextFont {
+                        font_size: 9.5,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.93, 0.95, 0.78)),
+                    TextLayout::new_with_justify(Justify::Center),
+                    TextShadow {
+                        offset: Vec2::new(1.0, 1.0),
+                        color: Color::srgba(0.0, 0.0, 0.0, 0.92),
+                    },
+                    HudSelectedText,
+                ));
+            });
+
+            hud.spawn((
+                Button,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(82.6),
+                    top: Val::Percent(7.5),
+                    width: Val::Percent(4.8),
+                    height: Val::Percent(8.4),
+                    min_width: Val::Px(38.0),
+                    min_height: Val::Px(38.0),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    column_gap: Val::Px(5.0),
                     ..default()
-                })
-                .with_children(|row| {
-                    for kind in PlantKind::ALL {
-                        row.spawn((
-                            Button,
+                },
+                BackgroundColor(Color::srgba(0.03, 0.10, 0.08, 0.70)),
+                BorderColor::all(Color::srgba(0.63, 0.82, 0.68, 0.62)),
+                HudPauseButton,
+                Name::new("Pause Button"),
+            ))
+            .with_children(|button| {
+                for left in [Val::Px(0.0), Val::Px(8.0)] {
+                    button.spawn((
+                        Node {
+                            width: Val::Px(5.0),
+                            height: Val::Px(20.0),
+                            left,
+                            border_radius: BorderRadius::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.86, 0.92, 0.73)),
+                    ));
+                }
+            });
+
+            hud.spawn((
+                Button,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(50.0),
+                    bottom: Val::Percent(20.0),
+                    width: Val::Px(46.0),
+                    height: Val::Px(46.0),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(6.0)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                UiTransform::from_translation(Val2::px(-23.0, 0.0)),
+                BackgroundColor(Color::srgba(0.06, 0.12, 0.05, 0.90)),
+                BorderColor::all(Color::srgba(0.87, 0.69, 0.27, 0.72)),
+                GlobalZIndex(3),
+                HudShovelButton,
+                Name::new("Shovel Tool"),
+            ))
+            .with_children(|button| {
+                button
+                    .spawn((
+                        Node {
+                            width: Val::Px(28.0),
+                            height: Val::Px(32.0),
+                            position_type: PositionType::Relative,
+                            ..default()
+                        },
+                        UiTransform::from_rotation(Rot2::degrees(-32.0)),
+                        Name::new("Shovel Icon"),
+                    ))
+                    .with_children(|icon| {
+                        icon.spawn((
                             Node {
-                                width: Val::Px(118.0),
-                                padding: UiRect::axes(Val::Px(6.0), Val::Px(6.0)),
-                                flex_direction: FlexDirection::Column,
-                                align_items: AlignItems::Center,
-                                justify_content: JustifyContent::Center,
-                                border_radius: BorderRadius::all(Val::Px(8.0)),
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(11.0),
+                                top: Val::Px(3.0),
+                                width: Val::Px(5.0),
+                                height: Val::Px(22.0),
+                                border_radius: BorderRadius::all(Val::Px(2.0)),
                                 ..default()
                             },
-                            BackgroundColor(Color::srgba(0.10, 0.16, 0.08, 0.85)),
-                            SeedButton(kind),
+                            BackgroundColor(Color::srgb(0.67, 0.40, 0.16)),
+                        ));
+                        icon.spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(7.0),
+                                top: Val::Px(1.0),
+                                width: Val::Px(13.0),
+                                height: Val::Px(5.0),
+                                border_radius: BorderRadius::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.82, 0.61, 0.29)),
+                        ));
+                        icon.spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(7.0),
+                                top: Val::Px(22.0),
+                                width: Val::Px(14.0),
+                                height: Val::Px(9.0),
+                                border_radius: BorderRadius {
+                                    top_left: Val::Px(2.0),
+                                    top_right: Val::Px(2.0),
+                                    bottom_left: Val::Px(5.0),
+                                    bottom_right: Val::Px(5.0),
+                                },
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.72, 0.77, 0.68)),
+                        ));
+                    });
+            });
+
+            hud.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(50.0),
+                    bottom: Val::Percent(20.9),
+                    width: Val::Px(82.0),
+                    min_height: Val::Px(24.0),
+                    padding: UiRect::axes(Val::Px(7.0), Val::Px(3.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                UiTransform::from_translation(Val2::px(30.0, 0.0)),
+                BackgroundColor(Color::srgba(0.02, 0.06, 0.03, 0.92)),
+                BorderColor::all(Color::srgba(0.91, 0.70, 0.28, 0.72)),
+                Text::new("SHOVEL"),
+                TextFont {
+                    font_size: 11.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.96, 0.88, 0.56)),
+                TextLayout::new_with_justify(Justify::Center),
+                Visibility::Hidden,
+                GlobalZIndex(4),
+                HudShovelTooltip,
+            ));
+
+            hud.spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(8.75),
+                bottom: Val::Percent(6.2),
+                width: Val::Percent(82.5),
+                height: Val::Percent(14.2),
+                align_items: AlignItems::Stretch,
+                column_gap: Val::Percent(0.8),
+                ..default()
+            })
+            .with_children(|row| {
+                for kind in PlantKind::ALL {
+                    let index = kind.index();
+                    let key = if index == 9 {
+                        "0".to_string()
+                    } else {
+                        (index + 1).to_string()
+                    };
+                    row.spawn((
+                        Button,
+                        Node {
+                            height: Val::Percent(100.0),
+                            flex_grow: 1.0,
+                            flex_basis: Val::Px(0.0),
+                            position_type: PositionType::Relative,
+                            overflow: Overflow::clip(),
+                            border: UiRect::all(Val::Px(2.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(if state.selected == kind {
+                            Color::srgba(0.22, 0.46, 0.14, 0.42)
+                        } else {
+                            Color::NONE
+                        }),
+                        BorderColor::all(if state.selected == kind {
+                            Color::srgb(0.83, 0.98, 0.47)
+                        } else {
+                            Color::NONE
+                        }),
+                        SeedButton(kind),
+                    ))
+                    .with_children(|card| {
+                        card.spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Percent(7.0),
+                                top: Val::Percent(3.0),
+                                width: Val::Percent(86.0),
+                                height: Val::Percent(57.0),
+                                overflow: Overflow::clip(),
+                                border_radius: BorderRadius::all(Val::Px(3.0)),
+                                ..default()
+                            },
+                            ImageNode::new(asset_server.load(kind.sprite_path()))
+                                .with_rect(kind.portrait_rect())
+                                .with_mode(NodeImageMode::Stretch),
+                            SeedCardPortrait(kind),
+                        ));
+                        card.spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(3.0),
+                                top: Val::Px(3.0),
+                                width: Val::Px(20.0),
+                                height: Val::Px(20.0),
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Percent(50.0)),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.02, 0.05, 0.025, 0.90)),
+                            BorderColor::all(Color::srgb(0.92, 0.71, 0.25)),
                         ))
-                        .with_children(|card| {
-                            card.spawn((
-                                Text::new(""),
+                        .with_children(|badge| {
+                            badge.spawn((
+                                Text::new(key),
                                 TextFont {
-                                    font_size: 13.0,
+                                    font_size: 10.0,
                                     ..default()
                                 },
-                                TextColor(Color::srgb(0.85, 0.93, 0.72)),
+                                TextColor(Color::srgb(1.0, 0.88, 0.48)),
+                                SeedCardKeyText(kind),
                             ));
                         });
-                    }
-                });
+                        card.spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Percent(3.0),
+                                top: Val::Percent(61.0),
+                                width: Val::Percent(94.0),
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            Text::new(""),
+                            TextFont {
+                                font_size: 10.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.92, 0.94, 0.78)),
+                            TextLayout::new_with_justify(Justify::Center),
+                            TextShadow {
+                                offset: Vec2::new(1.0, 1.0),
+                                color: Color::srgba(0.0, 0.0, 0.0, 0.94),
+                            },
+                            SeedCardNameText(kind),
+                        ));
+                        card.spawn(Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Percent(6.0),
+                            bottom: Val::Percent(2.0),
+                            width: Val::Percent(88.0),
+                            height: Val::Percent(20.0),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            column_gap: Val::Px(2.0),
+                            ..default()
+                        })
+                        .with_children(|cost| {
+                            cost.spawn((
+                                Node {
+                                    width: Val::Px(15.0),
+                                    height: Val::Px(15.0),
+                                    ..default()
+                                },
+                                ImageNode::new(asset_server.load(EFFECT_SUN)),
+                            ));
+                            cost.spawn((
+                                Text::new(""),
+                                TextFont {
+                                    font_size: 11.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(1.0, 0.83, 0.25)),
+                                TextShadow {
+                                    offset: Vec2::new(1.0, 1.0),
+                                    color: Color::srgba(0.0, 0.0, 0.0, 0.94),
+                                },
+                                SeedCardCostText(kind),
+                            ));
+                        });
+                    });
+                }
+            });
         });
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+fn hud_pause_button(
+    mut pause: ResMut<PauseState>,
+    mut buttons: Query<
+        (&Interaction, &mut BackgroundColor, &mut BorderColor),
+        (Changed<Interaction>, With<HudPauseButton>),
+    >,
+) {
+    for (interaction, mut background, mut border) in &mut buttons {
+        match interaction {
+            Interaction::Pressed => {
+                pause.paused = !pause.paused;
+                *background = BackgroundColor(Color::srgba(0.28, 0.43, 0.22, 0.96));
+                border.set_all(Color::srgb(0.98, 0.82, 0.38));
+            }
+            Interaction::Hovered => {
+                *background = BackgroundColor(Color::srgba(0.16, 0.29, 0.18, 0.92));
+                border.set_all(Color::srgb(0.81, 0.94, 0.70));
+            }
+            Interaction::None => {
+                *background = BackgroundColor(Color::srgba(0.03, 0.10, 0.08, 0.70));
+                border.set_all(Color::srgba(0.63, 0.82, 0.68, 0.62));
+            }
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn hud_shovel_button(
+    mut pointer_tool: ResMut<PointerTool>,
+    pause: Res<PauseState>,
+    language: Res<LanguageSettings>,
+    buttons: Query<&Interaction, With<HudShovelButton>>,
+    mut button_style: Query<
+        (&Interaction, &mut BackgroundColor, &mut BorderColor),
+        With<HudShovelButton>,
+    >,
+    mut tooltips: Query<(&mut Text, &mut Visibility), With<HudShovelTooltip>>,
+) {
+    if buttons
+        .iter()
+        .any(|interaction| *interaction == Interaction::Pressed)
+    {
+        *pointer_tool = match *pointer_tool {
+            PointerTool::Plant => PointerTool::Shovel,
+            PointerTool::Shovel => PointerTool::Plant,
+        };
+    }
+
+    let hovered = buttons
+        .iter()
+        .any(|interaction| *interaction == Interaction::Hovered);
+    let active = *pointer_tool == PointerTool::Shovel;
+    for (interaction, mut background, mut border) in &mut button_style {
+        let (background_color, border_color) = if active {
+            (
+                Color::srgba(0.47, 0.23, 0.08, 0.96),
+                Color::srgb(1.0, 0.79, 0.27),
+            )
+        } else if *interaction == Interaction::Hovered {
+            (
+                Color::srgba(0.19, 0.28, 0.11, 0.96),
+                Color::srgb(0.94, 0.82, 0.42),
+            )
+        } else {
+            (
+                Color::srgba(0.06, 0.12, 0.05, 0.90),
+                Color::srgba(0.87, 0.69, 0.27, 0.72),
+            )
+        };
+        *background = BackgroundColor(background_color);
+        border.set_all(border_color);
+    }
+
+    for (mut text, mut visibility) in &mut tooltips {
+        **text = match language.current {
+            Language::English => "SHOVEL",
+            Language::Chinese => "铲子",
+        }
+        .to_string();
+        *visibility = if !pause.paused && (active || hovered) {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn handle_board_input(
     mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -6369,8 +7468,22 @@ fn handle_board_input(
     cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     pause: Res<PauseState>,
     mut state: ResMut<BoardState>,
+    mut pointer_tool: ResMut<PointerTool>,
     plant_query: Query<(Entity, &Plant)>,
-    asset_server: Res<AssetServer>,
+    sun_query: Query<(Entity, &SunPickup, &GlobalTransform)>,
+    ui_buttons: Query<
+        &Interaction,
+        (
+            With<Button>,
+            Or<(
+                With<HudPauseButton>,
+                With<HudShovelButton>,
+                With<SeedButton>,
+                With<PauseButton>,
+            )>,
+        ),
+    >,
+    unit_visuals: Res<UnitVisualAssets>,
     settings: Res<GameSettings>,
     audio: Res<AsyncAudio>,
 ) {
@@ -6401,46 +7514,101 @@ fn handle_board_input(
             && let Some(kind) = plant_kind_for_digit_key(key)
         {
             state.selected = kind;
+            *pointer_tool = PointerTool::Plant;
         }
     }
 
-    // A tap acts like a left click at the touch position (phones/tablets
-    // have no separate cursor), while mouse clicks use the hover position.
-    let mut clicked_board = false;
+    // Hover continuously drives the board cursor. A tap uses its own position
+    // because touch screens do not have a persistent pointer.
     let tap_position = touches
         .iter_just_pressed()
         .next()
         .map(|touch| touch.position());
-    let pointer_position =
-        if mouse.just_pressed(MouseButton::Left) || mouse.just_pressed(MouseButton::Right) {
-            windows.single().ok().and_then(Window::cursor_position)
-        } else {
-            tap_position
-        };
+    let mouse_position = windows.single().ok().and_then(Window::cursor_position);
+    let pointer_position = tap_position.or(mouse_position);
     if let Some(position) = pointer_position
         && let Some((col, lane)) = position_grid_cell(position, &cameras)
     {
         state.cursor_col = col;
         state.cursor_lane = lane;
-        clicked_board = true;
-    }
-
-    if keyboard.just_pressed(KeyCode::Backspace) || mouse.just_pressed(MouseButton::Right) {
-        for (entity, plant) in &plant_query {
-            if plant.col == state.cursor_col && plant.lane == state.cursor_lane {
-                commands.entity(entity).despawn();
-                break;
-            }
-        }
     }
 
     if pause.paused {
         return;
     }
 
+    let ui_claimed_click = ui_buttons
+        .iter()
+        .any(|interaction| *interaction == Interaction::Pressed);
+    let primary_press_position = if ui_claimed_click {
+        None
+    } else if mouse.just_pressed(MouseButton::Left) {
+        mouse_position
+    } else {
+        tap_position
+    };
+
+    // Sun is a screen-space target layered over the lawn. Resolve it before
+    // board placement so collecting an orb never plants underneath it.
+    if let Some(position) = primary_press_position
+        && let Ok((camera, camera_transform)) = cameras.single()
+    {
+        let mut closest: Option<(Entity, u32, f32)> = None;
+        for (entity, sun, transform) in &sun_query {
+            let Ok(screen_position) =
+                camera.world_to_viewport(camera_transform, transform.translation())
+            else {
+                continue;
+            };
+            let distance_squared = position.distance_squared(screen_position);
+            if distance_squared <= SUN_POINTER_RADIUS * SUN_POINTER_RADIUS
+                && closest.is_none_or(|(_, _, best)| distance_squared < best)
+            {
+                closest = Some((entity, sun.value, distance_squared));
+            }
+        }
+        if let Some((entity, value, _)) = closest {
+            state.sun += value;
+            state.sun_pickups_collected += 1;
+            commands.entity(entity).despawn();
+            play_sound(&audio, &settings, AUDIO_SUN_COLLECT, 0.58);
+            return;
+        }
+    }
+
+    let clicked_board = primary_press_position
+        .and_then(|position| position_grid_cell(position, &cameras))
+        .is_some();
+    let quick_shovel =
+        keyboard.just_pressed(KeyCode::Backspace) || mouse.just_pressed(MouseButton::Right);
+    if quick_shovel {
+        for (entity, plant) in &plant_query {
+            if plant.col == state.cursor_col && plant.lane == state.cursor_lane {
+                commands.entity(entity).despawn();
+                break;
+            }
+        }
+        return;
+    }
+
+    if *pointer_tool == PointerTool::Shovel && clicked_board {
+        for (entity, plant) in &plant_query {
+            if plant.col == state.cursor_col && plant.lane == state.cursor_lane {
+                commands.entity(entity).despawn();
+                *pointer_tool = PointerTool::Plant;
+                break;
+            }
+        }
+        return;
+    }
+
     // Mouse planting requires the click to land on a board tile, so UI
     // clicks (seed cards, pause buttons) never place a plant as a side effect.
-    let wants_plant = keyboard.just_pressed(KeyCode::Space)
+    let keyboard_plant = keyboard.just_pressed(KeyCode::Space);
+    if keyboard_plant {
+        *pointer_tool = PointerTool::Plant;
+    }
+    let wants_plant = keyboard_plant
         || (clicked_board && (mouse.just_pressed(MouseButton::Left) || tap_position.is_some()));
     if !wants_plant {
         return;
@@ -6467,7 +7635,7 @@ fn handle_board_input(
     state.plant_cooldowns[kind.index()] = kind.cooldown_seconds();
     spawn_plant(
         &mut commands,
-        &asset_server,
+        &unit_visuals,
         kind,
         state.cursor_col,
         state.cursor_lane,
@@ -6548,7 +7716,7 @@ fn update_pause_ui(
                     ))
                     .with_children(|parent| {
                         parent.spawn((
-                            Text::new(pause_text(locale, language.current, &settings)),
+                            Text::new(pause_text(locale, language.current)),
                             TextFont {
                                 font_size: 20.0,
                                 ..default()
@@ -6556,6 +7724,18 @@ fn update_pause_ui(
                             TextColor(Color::srgb(0.92, 0.96, 0.78)),
                             PauseText,
                         ));
+                        parent
+                            .spawn(Node {
+                                width: Val::Px(300.0),
+                                height: Val::Px(38.0),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                column_gap: Val::Px(6.0),
+                                ..default()
+                            })
+                            .with_children(|controls| {
+                                spawn_settings_controls(controls, language.current, &settings);
+                            });
                         for (action, label) in [
                             (PauseButton::Resume, locale.pause_resume.clone()),
                             (PauseButton::Restart, locale.pause_restart.clone()),
@@ -6595,7 +7775,7 @@ fn update_pause_ui(
     } else if pause.paused && (settings.is_changed() || language.is_changed()) {
         let locale = localization.text(language.current);
         for mut text in &mut text_query {
-            **text = pause_text(locale, language.current, &settings);
+            **text = pause_text(locale, language.current);
         }
         for (mut text, action) in &mut button_labels {
             **text = match action {
@@ -6640,24 +7820,12 @@ fn pause_menu_buttons(
     }
 }
 
-fn pause_text(locale: &LocaleText, language: Language, settings: &GameSettings) -> String {
-    let (resume, fullscreen, volume, lang_label, on, off) = match language {
-        Language::English => (
-            "P resume",
-            "F fullscreen",
-            "+/- volume",
-            "L language",
-            "on",
-            "off",
-        ),
-        Language::Chinese => ("P 继续", "F 全屏", "+/- 音量", "L 语言", "开", "关"),
-    };
-    format!(
-        "{}\n{resume} | {fullscreen}: {} | {volume}: {:.0}% | {lang_label}",
-        locale.title,
-        if settings.fullscreen { on } else { off },
-        settings.master_volume * 100.0
-    )
+fn pause_text(_locale: &LocaleText, language: Language) -> String {
+    match language {
+        Language::English => "PAUSED",
+        Language::Chinese => "游戏暂停",
+    }
+    .to_string()
 }
 
 fn wave_progress(wave: u32, timer_fraction: f32, final_wave: u32, final_started: bool) -> f32 {
@@ -6714,7 +7882,7 @@ fn update_onboarding(
             }
         }
         1 => {
-            if state.sun >= 100 {
+            if state.sun_pickups_collected > 0 {
                 onboarding.step = 2;
             }
         }
@@ -6745,7 +7913,7 @@ fn update_onboarding(
             .spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    bottom: Val::Px(124.0),
+                    bottom: Val::Percent(29.0),
                     width: Val::Percent(100.0),
                     justify_content: JustifyContent::Center,
                     ..default()
@@ -6756,20 +7924,29 @@ fn update_onboarding(
             .with_children(|root| {
                 root.spawn((
                     Node {
+                        width: Val::Percent(62.0),
                         padding: UiRect::axes(Val::Px(18.0), Val::Px(8.0)),
+                        justify_content: JustifyContent::Center,
+                        border: UiRect::all(Val::Px(1.0)),
                         border_radius: BorderRadius::all(Val::Px(8.0)),
                         ..default()
                     },
                     BackgroundColor(Color::srgba(0.03, 0.09, 0.06, 0.85)),
+                    BorderColor::all(Color::srgba(0.91, 0.70, 0.28, 0.72)),
                 ))
                 .with_children(|panel| {
                     panel.spawn((
                         Text::new(hint.clone()),
                         TextFont {
-                            font_size: 18.0,
+                            font_size: 16.0,
                             ..default()
                         },
                         TextColor(Color::srgb(0.98, 0.88, 0.52)),
+                        TextLayout::new_with_justify(Justify::Center),
+                        TextShadow {
+                            offset: Vec2::new(1.0, 2.0),
+                            color: Color::srgba(0.0, 0.0, 0.0, 0.90),
+                        },
                         HintText,
                     ));
                 });
@@ -6781,13 +7958,78 @@ fn update_onboarding(
     }
 }
 
-fn update_cursor(state: Res<BoardState>, mut query: Query<&mut Transform, With<CursorMarker>>) {
-    if !state.is_changed() {
-        return;
-    }
-    if let Ok(mut transform) = query.single_mut() {
+#[allow(clippy::type_complexity)]
+fn update_cursor(
+    state: Res<BoardState>,
+    pointer_tool: Res<PointerTool>,
+    plants: Query<&Plant>,
+    asset_server: Res<AssetServer>,
+    mut cursor: Query<
+        (&mut Transform, &MeshMaterial3d<StandardMaterial>),
+        (With<CursorMarker>, Without<PlacementGhost>),
+    >,
+    mut ghost: Query<
+        (
+            &mut Transform,
+            &MeshMaterial3d<StandardMaterial>,
+            &mut Visibility,
+        ),
+        (With<PlacementGhost>, Without<CursorMarker>),
+    >,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let occupied = plants
+        .iter()
+        .any(|plant| plant.col == state.cursor_col && plant.lane == state.cursor_lane);
+    let placement_valid = *pointer_tool == PointerTool::Plant
+        && plant_placement_block(
+            false,
+            occupied,
+            state.sun,
+            state.plant_cooldowns[state.selected.index()],
+            state.selected,
+        )
+        .is_none();
+    if let Ok((mut transform, material_handle)) = cursor.single_mut() {
         transform.translation.x = col_x(state.cursor_col);
         transform.translation.z = lane_z(state.cursor_lane);
+        let (base_color, emissive) = match *pointer_tool {
+            PointerTool::Shovel if occupied => (
+                Color::srgba(1.0, 0.42, 0.12, 0.68),
+                Color::srgb(0.32, 0.08, 0.01),
+            ),
+            PointerTool::Shovel => (
+                Color::srgba(0.72, 0.18, 0.10, 0.34),
+                Color::srgb(0.12, 0.02, 0.01),
+            ),
+            PointerTool::Plant if placement_valid => (
+                Color::srgba(0.55, 0.94, 0.28, 0.58),
+                Color::srgb(0.10, 0.24, 0.03),
+            ),
+            PointerTool::Plant => (
+                Color::srgba(0.92, 0.22, 0.12, 0.46),
+                Color::srgb(0.22, 0.03, 0.01),
+            ),
+        };
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            material.base_color = base_color;
+            material.emissive = emissive.into();
+        }
+    }
+    if let Ok((mut transform, material_handle, mut visibility)) = ghost.single_mut() {
+        transform.translation.x = col_x(state.cursor_col);
+        transform.translation.z = lane_z(state.cursor_lane);
+        *visibility = if placement_valid {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            let texture = asset_server.load(state.selected.sprite_path());
+            if material.base_color_texture.as_ref() != Some(&texture) {
+                material.base_color_texture = Some(texture);
+            }
+        }
     }
 }
 
@@ -6797,7 +8039,7 @@ fn billboard_mesh(width: f32, height: f32) -> Mesh {
 
 fn spawn_plant(
     commands: &mut Commands,
-    asset_server: &AssetServer,
+    visuals: &UnitVisualAssets,
     kind: PlantKind,
     col: usize,
     lane: usize,
@@ -6813,11 +8055,14 @@ fn spawn_plant(
         _ => 7.0,
     };
     commands.spawn((
-        SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(kind.model_path()))),
-        Transform::from_xyz(col_x(col), 0.04, lane_z(lane)).with_scale(Vec3::splat(0.05)),
+        Mesh3d(visuals.mesh.clone()),
+        MeshMaterial3d(visuals.plant_materials[kind.index()].clone()),
+        Transform::from_xyz(col_x(col), kind.visual_center_y(), lane_z(lane))
+            .with_rotation(Quat::from_rotation_x(UNIT_BILLBOARD_TILT))
+            .with_scale(Vec3::splat(0.05)),
         GrowIn {
             timer: Timer::from_seconds(0.3, TimerMode::Once),
-            target_scale: 1.2,
+            target_scale: kind.visual_scale(),
         },
         Plant {
             kind,
@@ -6850,6 +8095,7 @@ fn populate_store_screenshot_scene(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
+    unit_visuals: Res<UnitVisualAssets>,
 ) {
     let Some(scene) = mode.scene else {
         return;
@@ -6872,14 +8118,14 @@ fn populate_store_screenshot_scene(
                 (PlantKind::SnowPea, 2, 3),
                 (PlantKind::Repeater, 3, 2),
             ] {
-                spawn_plant(&mut commands, &asset_server, kind, col, lane);
+                spawn_plant(&mut commands, &unit_visuals, kind, col, lane);
             }
             for (kind, lane, x) in [
                 (ZombieKind::Walker, 1, 4.8),
                 (ZombieKind::Conehead, 2, 5.9),
                 (ZombieKind::Runner, 3, 3.7),
             ] {
-                spawn_zombie_entity(&mut commands, &asset_server, kind, lane, x, 3, locale);
+                spawn_zombie_entity(&mut commands, &unit_visuals, kind, lane, x, 3, locale);
             }
             spawn_sun_pickup(
                 &mut commands,
@@ -6926,7 +8172,7 @@ fn populate_store_screenshot_scene(
                 (PlantKind::Torchwood, 3, 3),
                 (PlantKind::Garlic, 4, 4),
             ] {
-                spawn_plant(&mut commands, &asset_server, kind, col, lane);
+                spawn_plant(&mut commands, &unit_visuals, kind, col, lane);
             }
             for (kind, lane, x) in [
                 (ZombieKind::Healer, 0, 5.2),
@@ -6937,7 +8183,7 @@ fn populate_store_screenshot_scene(
             ] {
                 spawn_zombie_entity(
                     &mut commands,
-                    &asset_server,
+                    &unit_visuals,
                     kind,
                     lane,
                     x,
@@ -6984,7 +8230,7 @@ fn populate_store_screenshot_scene(
                 (PlantKind::SnowPea, 2, 4),
                 (PlantKind::Spikeweed, 5, 4),
             ] {
-                spawn_plant(&mut commands, &asset_server, kind, col, lane);
+                spawn_plant(&mut commands, &unit_visuals, kind, col, lane);
             }
             for (kind, lane, x) in [
                 (ZombieKind::Gargantuar, 1, 5.7),
@@ -6996,7 +8242,7 @@ fn populate_store_screenshot_scene(
             ] {
                 spawn_zombie_entity(
                     &mut commands,
-                    &asset_server,
+                    &unit_visuals,
                     kind,
                     lane,
                     x,
@@ -7021,29 +8267,24 @@ fn populate_store_screenshot_scene(
 #[allow(clippy::too_many_arguments)]
 fn spawn_zombie_entity(
     commands: &mut Commands,
-    asset_server: &AssetServer,
+    visuals: &UnitVisualAssets,
     kind: ZombieKind,
     lane: usize,
     x: f32,
     wave: u32,
     locale: &LocaleText,
 ) {
-    let (health, speed, damage, radius) = kind.stats(wave);
-    let sprite_height = if kind == ZombieKind::Gargantuar {
-        1.78
-    } else {
-        1.34
-    };
-    let sprite_width = radius
-        * if kind == ZombieKind::Gargantuar {
-            2.25
-        } else {
-            2.05
-        };
-    let model_scale = sprite_width.max(sprite_height) * 0.72;
+    let (health, speed, damage, _) = kind.stats(wave);
     commands.spawn((
-        SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(kind.model_path()))),
-        Transform::from_xyz(x, 0.04, lane_z(lane)).with_scale(Vec3::splat(model_scale)),
+        Mesh3d(visuals.mesh.clone()),
+        MeshMaterial3d(visuals.zombie_materials[kind.index()].clone()),
+        Transform::from_xyz(x, kind.visual_center_y(), lane_z(lane))
+            .with_rotation(Quat::from_rotation_x(UNIT_BILLBOARD_TILT))
+            .with_scale(Vec3::splat(0.05)),
+        GrowIn {
+            timer: Timer::from_seconds(0.24, TimerMode::Once),
+            target_scale: kind.visual_scale(),
+        },
         Zombie {
             kind,
             lane,
@@ -7429,7 +8670,7 @@ fn spawn_zombies(
     levels: Res<LevelCatalog>,
     language: Res<LanguageSettings>,
     localization: Res<LocalizationCatalog>,
-    asset_server: Res<AssetServer>,
+    unit_visuals: Res<UnitVisualAssets>,
 ) {
     let level = &levels.levels[state.level_index];
     let locale = localization.text(language.current);
@@ -7472,42 +8713,15 @@ fn spawn_zombies(
             state.final_wave_started,
             &mut rng,
         );
-        let (health, speed, damage, radius) = kind.stats(state.wave);
-        let sprite_height = if kind == ZombieKind::Gargantuar {
-            1.78
-        } else {
-            1.34
-        };
-        let sprite_width = radius
-            * if kind == ZombieKind::Gargantuar {
-                2.25
-            } else {
-                2.05
-            };
-        let model_scale = sprite_width.max(sprite_height) * 0.72;
-        commands.spawn((
-            SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(kind.model_path()))),
-            Transform::from_xyz(
-                ZOMBIE_START_X + rng.random_range(0.0..1.0),
-                0.04,
-                lane_z(lane),
-            )
-            .with_scale(Vec3::splat(model_scale)),
-            Zombie {
-                kind,
-                lane,
-                health,
-                max_health: health,
-                speed,
-                damage,
-                attack_timer: Timer::from_seconds(0.8, TimerMode::Repeating),
-                slow_timer: Timer::from_seconds(0.0, TimerMode::Once),
-                special_timer: Timer::from_seconds(1.7, TimerMode::Repeating),
-                jumped: false,
-            },
-            GameEntity,
-            Name::new(kind.label(locale).to_string()),
-        ));
+        spawn_zombie_entity(
+            &mut commands,
+            &unit_visuals,
+            kind,
+            lane,
+            ZOMBIE_START_X + rng.random_range(0.0..1.0),
+            state.wave,
+            locale,
+        );
     }
 }
 
@@ -7679,6 +8893,7 @@ fn announce_waves(
     }
     let locale = localization.text(language.current);
     let announce = if state.final_wave_started && !last.1 {
+        last.0 = state.wave;
         last.1 = true;
         Some((
             locale.final_wave_warning.clone(),
@@ -7777,14 +8992,16 @@ fn animate_units(
     let t = time.elapsed_secs();
     for (mut transform, plant) in &mut plants {
         let phase = plant.col as f32 * 1.3 + plant.lane as f32 * 2.1;
-        transform.rotation = Quat::from_rotation_z((t * 1.8 + phase).sin() * 0.045)
-            * Quat::from_rotation_x((t * 1.3 + phase).cos() * 0.03);
+        transform.rotation =
+            Quat::from_rotation_x(UNIT_BILLBOARD_TILT + (t * 1.3 + phase).cos() * 0.018)
+                * Quat::from_rotation_z((t * 1.8 + phase).sin() * 0.045);
     }
     for (mut transform, zombie) in &mut zombies {
         let phase = zombie.lane as f32 * 1.7 + transform.translation.x * 2.0;
         let step = (t * 5.0 + phase).sin();
-        transform.translation.y = 0.04 + step.abs() * 0.05;
-        transform.rotation = Quat::from_rotation_z(step * 0.06);
+        transform.translation.y = zombie.kind.visual_center_y() + step.abs() * 0.04;
+        transform.rotation =
+            Quat::from_rotation_x(UNIT_BILLBOARD_TILT) * Quat::from_rotation_z(step * 0.055);
     }
     for mut transform in &mut suns {
         let phase = transform.translation.x * 3.0 + transform.translation.z;
@@ -7947,9 +9164,10 @@ fn collect_sun(
         if sun.lifetime.is_finished() {
             commands.entity(entity).despawn();
         } else if keyboard.just_pressed(KeyCode::KeyC) {
-            // C acts as a sun magnet: chasing each orb with the cursor made
-            // keyboard play a chore and left sky sun rotting on far tiles.
+            // The keyboard shortcut remains an optional magnet; pointer play
+            // collects the orb that was actually clicked.
             state.sun += sun.value;
+            state.sun_pickups_collected += 1;
             collected += 1;
             commands.entity(entity).despawn();
         }
@@ -8086,25 +9304,76 @@ fn update_hud(
     language: Res<LanguageSettings>,
     localization: Res<LocalizationCatalog>,
     levels: Res<LevelCatalog>,
-    settings: Res<GameSettings>,
-    pause: Res<PauseState>,
-    mut status_query: Query<&mut Text, (With<HudStatusText>, Without<HudSeedBankText>)>,
+    asset_server: Res<AssetServer>,
+    mut texts: Query<(
+        &mut Text,
+        Option<&HudLevelText>,
+        Option<&HudSunText>,
+        Option<&HudWaveText>,
+        Option<&HudScoreText>,
+        Option<&HudSelectedText>,
+    )>,
+    mut selected_portrait: Query<&mut ImageNode, With<HudSelectedPortrait>>,
 ) {
     let locale = localization.text(language.current);
     let level = &levels.levels[state.level_index];
-    if let Ok(mut text) = status_query.single_mut() {
-        **text = hud_status_text(locale, language.current, &state, level, &settings, &pause);
+    for (mut text, level_marker, sun_marker, wave_marker, score_marker, selected_marker) in
+        &mut texts
+    {
+        let value = if level_marker.is_some() {
+            format!(
+                "{:02}\n{}",
+                state.level_index + 1,
+                level.title(language.current)
+            )
+        } else if sun_marker.is_some() {
+            state.sun.to_string()
+        } else if wave_marker.is_some() {
+            match language.current {
+                Language::English => format!("WAVE\n{} / {}", state.wave, level.final_wave),
+                Language::Chinese => format!("波次\n{} / {}", state.wave, level.final_wave),
+            }
+        } else if score_marker.is_some() {
+            match language.current {
+                Language::English => format!("SCORE\n{}", state.score),
+                Language::Chinese => format!("得分\n{}", state.score),
+            }
+        } else if selected_marker.is_some() {
+            format!(
+                "{}\n{}",
+                state.selected.hud_label(locale, language.current),
+                state.selected.cost()
+            )
+        } else {
+            continue;
+        };
+        if text.0 != value {
+            text.0 = value;
+        }
+    }
+
+    if let Ok(mut image) = selected_portrait.single_mut() {
+        let target = asset_server.load(state.selected.sprite_path());
+        if image.image != target {
+            image.image = target;
+        }
+        let rect = state.selected.portrait_rect();
+        if image.rect != Some(rect) {
+            image.rect = Some(rect);
+        }
     }
 }
 
 #[allow(clippy::type_complexity)]
 fn seed_card_clicks(
     mut state: ResMut<BoardState>,
+    mut pointer_tool: ResMut<PointerTool>,
     cards: Query<(&SeedButton, &Interaction), (Changed<Interaction>, With<Button>)>,
 ) {
     for (seed, interaction) in &cards {
         if *interaction == Interaction::Pressed {
             state.selected = seed.0;
+            *pointer_tool = PointerTool::Plant;
         }
     }
 }
@@ -8114,47 +9383,103 @@ fn update_seed_cards(
     state: Res<BoardState>,
     language: Res<LanguageSettings>,
     localization: Res<LocalizationCatalog>,
-    mut cards: Query<(&SeedButton, &Interaction, &mut BackgroundColor, &Children)>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut cards: Query<(
+        &SeedButton,
+        &Interaction,
+        &mut BackgroundColor,
+        &mut BorderColor,
+    )>,
+    mut texts: Query<(
+        &mut Text,
+        &mut TextColor,
+        Option<&SeedCardKeyText>,
+        Option<&SeedCardNameText>,
+        Option<&SeedCardCostText>,
+    )>,
+    mut portraits: Query<(&SeedCardPortrait, &mut ImageNode)>,
 ) {
     let locale = localization.text(language.current);
-    for (seed, interaction, mut background, children) in &mut cards {
+    for (seed, interaction, mut background, mut border) in &mut cards {
         let kind = seed.0;
-        let index = kind.index();
-        let cooldown = state.plant_cooldowns[index];
-        let ready = state.sun >= kind.cost() && cooldown <= 0.0;
         let target = if state.selected == kind {
-            Color::srgba(0.34, 0.50, 0.20, 0.95)
+            Color::srgba(0.22, 0.46, 0.14, 0.42)
         } else if *interaction == Interaction::Hovered {
-            Color::srgba(0.24, 0.34, 0.14, 0.90)
+            Color::srgba(0.38, 0.48, 0.18, 0.22)
         } else {
-            Color::srgba(0.10, 0.16, 0.08, 0.85)
+            Color::NONE
         };
         if background.0 != target {
             *background = BackgroundColor(target);
         }
-        for child in children {
-            let Ok((mut text, mut color)) = texts.get_mut(*child) else {
-                continue;
+        let border_target = if state.selected == kind {
+            Color::srgb(0.83, 0.98, 0.47)
+        } else if *interaction == Interaction::Hovered {
+            Color::srgba(0.96, 0.77, 0.30, 0.82)
+        } else {
+            Color::NONE
+        };
+        if border.top != border_target {
+            border.set_all(border_target);
+        }
+    }
+
+    for (mut text, mut color, key_marker, name_marker, cost_marker) in &mut texts {
+        let (value, target) = if let Some(marker) = key_marker {
+            let index = marker.0.index();
+            let key = if index == 9 {
+                "0".to_string()
+            } else {
+                (index + 1).to_string()
             };
-            let key = if index == 9 { 0 } else { index + 1 };
-            let cost_line = if cooldown > 0.0 {
-                format!("{}  {:.0}s", kind.cost(), cooldown.ceil())
+            (key, Color::srgb(1.0, 0.88, 0.48))
+        } else if let Some(marker) = name_marker {
+            let kind = marker.0;
+            let ready = state.sun >= kind.cost() && state.plant_cooldowns[kind.index()] <= 0.0;
+            let target = if state.selected == kind {
+                Color::srgb(1.0, 0.90, 0.43)
+            } else if ready {
+                Color::srgb(0.85, 0.93, 0.72)
+            } else {
+                Color::srgb(0.52, 0.55, 0.48)
+            };
+            (kind.hud_label(locale, language.current).to_string(), target)
+        } else if let Some(marker) = cost_marker {
+            let kind = marker.0;
+            let cooldown = state.plant_cooldowns[kind.index()];
+            let value = if cooldown > 0.0 {
+                format!("{:.0}s", cooldown.ceil())
             } else {
                 kind.cost().to_string()
             };
-            let line = format!("{key} {}\n{cost_line}", kind.label(locale));
-            if text.0 != line {
-                text.0 = line;
-            }
-            let text_target = if ready {
-                Color::srgb(0.85, 0.93, 0.72)
+            let target = if cooldown > 0.0 {
+                Color::srgb(0.55, 0.67, 0.68)
+            } else if state.sun >= kind.cost() {
+                Color::srgb(1.0, 0.83, 0.25)
             } else {
-                Color::srgb(0.50, 0.56, 0.48)
+                Color::srgb(0.57, 0.55, 0.42)
             };
-            if color.0 != text_target {
-                color.0 = text_target;
-            }
+            (value, target)
+        } else {
+            continue;
+        };
+        if text.0 != value {
+            text.0 = value;
+        }
+        if color.0 != target {
+            color.0 = target;
+        }
+    }
+
+    for (marker, mut image) in &mut portraits {
+        let kind = marker.0;
+        let ready = state.sun >= kind.cost() && state.plant_cooldowns[kind.index()] <= 0.0;
+        let target = if ready || state.selected == kind {
+            Color::WHITE
+        } else {
+            Color::srgba(0.48, 0.52, 0.45, 0.82)
+        };
+        if image.color != target {
+            image.color = target;
         }
     }
 }
@@ -8409,7 +9734,27 @@ fn lane_z(lane: usize) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::{IntoSystem, System};
     use std::collections::HashSet;
+
+    #[test]
+    fn mouse_first_system_params_initialize_without_query_conflicts() {
+        let mut world = World::new();
+        macro_rules! initialize {
+            ($system:expr) => {{
+                let mut system = IntoSystem::into_system($system);
+                system.initialize(&mut world);
+            }};
+        }
+
+        initialize!(settings_mouse);
+        initialize!(update_settings_control_labels);
+        initialize!(hud_pause_button);
+        initialize!(hud_shovel_button);
+        initialize!(handle_board_input);
+        initialize!(update_cursor);
+        initialize!(update_hud);
+    }
 
     #[test]
     fn embedded_level_data_is_valid_for_progression() {
@@ -8568,19 +9913,19 @@ mod tests {
 
         assert!(report.contains("asset audit ok"));
         assert!(report.contains("assets/branding/generated/app-icon.png | png 1254x1254"));
-        assert!(report.contains("assets/art/sprites/plants/sprout-slinger.png | png 251x627"));
+        assert!(report.contains("assets/art/sprites/plants/sprout-slinger.png | png 512x640"));
         assert!(report.contains("assets/models/plants/sprout-slinger.glb | glb"));
         assert!(report.contains("assets/models/monsters/gargantuar.glb | glb"));
         assert!(report.contains("assets/art/effects/explosion.png | png 256x256"));
         assert!(report.contains("assets/art/ui/menu-panel.png | png 192x192"));
         assert!(report.contains("assets/art/ui/hud-panel.png | png 192x96"));
         assert!(report.contains("assets/audio/music-loop.wav | wav 7.50s 1ch 16bit 44100Hz"));
-        assert!(report.contains("png assets: 36"));
+        assert!(report.contains("png assets: 38"));
         assert!(report.contains("wav assets: 7"));
         assert!(report.contains("svg assets: 2"));
         assert!(report.contains("glb assets: 20"));
         assert!(report.contains("metadata assets: 6"));
-        assert!(report.contains("production art assets: 56"));
+        assert!(report.contains("production art assets: 58"));
     }
 
     #[test]
@@ -8603,7 +9948,9 @@ mod tests {
 
         assert!(report.contains("control audit ok: 24 bindings"));
         assert!(report.contains("Enter | menu/end | start or restart"));
-        assert!(report.contains("Mouse left | gameplay | move cursor and plant selected seed"));
+        assert!(report.contains(
+            "Mouse left | menu/gameplay | activate UI, collect sun, and use the active lawn tool"
+        ));
         assert!(report.contains("0 | menu/gameplay | select level 10 or Scent Root"));
         assert!(report.contains("+ | global | raise saved master volume"));
         assert!(report.contains("- | global | lower saved master volume"));
@@ -8783,7 +10130,7 @@ mod tests {
         assert!(report.contains("sun pickup budget: 47"));
         assert!(report.contains("visual effect budget: 45"));
         assert!(report.contains("estimated dynamic entities: 275/320"));
-        assert!(report.contains("embedded asset bytes: 17035820/25000000"));
+        assert!(report.contains("embedded asset bytes: 19253930/25000000"));
         assert!(report.contains("checked viewport floor: compact-540p 960x540"));
         assert!(report.contains("manual performance QA still required"));
     }
@@ -8882,7 +10229,7 @@ mod tests {
         assert!(report.contains("automated evidence: pass"));
         assert!(report.contains("release data: pass"));
         assert!(report.contains("balance audit: pass (10 levels)"));
-        assert!(report.contains("asset audit: pass (production art assets: 56)"));
+        assert!(report.contains("asset audit: pass (production art assets: 58)"));
         assert!(report.contains("audio audit: pass (peak max 0.450, rms min 0.049)"));
         assert!(report.contains("control audit: pass (24 bindings)"));
         assert!(report.contains("input flow audit: pass (10/10 plants covered)"));
@@ -10048,11 +11395,13 @@ mod tests {
         assert_eq!(png_dimensions(UI_MENU_PANEL_PNG), Some((192, 192)));
         assert_eq!(png_dimensions(UI_HUD_PANEL_PNG), Some((192, 96)));
         assert_eq!(png_dimensions(UI_END_PANEL_PNG), Some((192, 192)));
+        assert_eq!(png_dimensions(UI_MENU_BACKGROUND_PNG), Some((1672, 941)));
+        assert_eq!(png_dimensions(UI_HUD_OVERLAY_PNG), Some((1672, 941)));
         assert_eq!(PLANT_SPRITE_ASSETS.len(), PlantKind::COUNT);
         assert_eq!(MONSTER_SPRITE_ASSETS.len(), ZombieKind::COUNT);
         assert_eq!(EFFECT_ASSETS.len(), 6);
         assert_eq!(ENVIRONMENT_ASSETS.len(), 3);
-        assert_eq!(UI_ASSETS.len(), 3);
+        assert_eq!(UI_ASSETS.len(), 5);
         assert_eq!(AUDIO_ASSETS.len(), 7);
         assert_eq!(
             runtime_asset_paths().len(),
@@ -10181,6 +11530,8 @@ mod tests {
             "assets/art/ui/menu-panel.png",
             "assets/art/ui/hud-panel.png",
             "assets/art/ui/end-panel.png",
+            "assets/art/ui/menu-background.png",
+            "assets/art/ui/hud-overlay.png",
             "assets/branding/generated/app-icon.png",
             "assets/branding/generated/store-capsule.png",
             "CONTENT_RATING.md",

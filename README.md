@@ -8,8 +8,8 @@ A Bevy lane-defense strategy game: place greenhouse defenders, manage sun income
 
 - `Enter`: start or restart
 - `Arrow keys`: move the grid cursor
-- `Mouse left`: move cursor to a lawn tile and plant the selected seed
-- `Mouse right`: move cursor to a lawn tile and shovel that tile
+- `Mouse left`: choose missions and seed cards, collect sun, or use the active lawn tool
+- `Mouse right`: quick-shovel the lawn tile under the pointer
 - `Tab`: cycle the selected level on the menu
 - `1`: select Sprout Slinger, steady single-lane shots
 - `2`: select Sunbloom, creates sun
@@ -23,7 +23,7 @@ A Bevy lane-defense strategy game: place greenhouse defenders, manage sun income
 - `0`: select Scent Root, redirects attackers to another lane
 - `Space`: plant the selected seed
 - `Backspace`: shovel the selected tile
-- `C`: collect sun on the selected tile
+- `C`: optional shortcut to collect every visible sun
 - `L`: switch language between English and Chinese
 - `P`: pause or resume in game
 - `F`: toggle fullscreen
@@ -32,6 +32,8 @@ A Bevy lane-defense strategy game: place greenhouse defenders, manage sun income
 
 ## Gameplay
 
+- The primary loop is mouse-first: click a seed card, hover for placement feedback, then click an open lawn tile.
+- Click floating sun directly; choose the visible shovel tool to remove a plant. Keyboard controls remain optional shortcuts.
 - Ten plant types cover economy, blockers, single-target fire, slows, burst damage, ground traps, lane control, and close-range fire.
 - Planting uses per-seed cooldowns, shown directly in the seed bank.
 - Ten undead enemy types escalate across waves: walkers, cone guards, runners, bucket guards, brutes, healers, jumpers, diggers, frostbiters, and giants.
@@ -42,7 +44,7 @@ A Bevy lane-defense strategy game: place greenhouse defenders, manage sun income
 ## Localization
 
 - English and Chinese are supported in menu, HUD, plant names, plant descriptions, and end screens.
-- Press `L` at any time to switch language.
+- Click the language control in the menu or pause panel; `L` remains a shortcut.
 - Localization data lives in `assets/i18n/en.ron` and `assets/i18n/zh.ron`.
 
 ## Levels And Progress
@@ -57,8 +59,8 @@ A Bevy lane-defense strategy game: place greenhouse defenders, manage sun income
 
 ## Pause And Settings
 
-- Press `P` in game to freeze waves, combat, projectiles, cooldowns, and sun collection.
-- While paused, the settings panel shows fullscreen and volume controls.
+- Click the HUD pause button to freeze waves, combat, projectiles, cooldowns, and sun collection; `P` remains a shortcut.
+- The menu and pause panel provide clickable language, fullscreen, and volume controls.
 
 ## Asset Direction
 
